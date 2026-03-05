@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CodeDNA — 铸造说明组件</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0d0f1a;
+      font-family: 'Inter', 'PingFang SC', sans-serif;
+      color: #e2e8f0;
+      padding: 40px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      align-items: center;
+    }
+
+    /* ── 通用卡片 ── */
+    .card {
+      width: 100%;
+      max-width: 720px;
+      border-radius: 16px;
+      padding: 28px 32px;
+      border: 1px solid;
+    }
+
+    /* ── GOLD_SOURCE 授权说明卡片 ── */
+    .card-approve {
+      background: linear-gradient(135deg, #1a1228 0%, #120d20 100%);
+      border-color: #7c3aed55;
+    }
+    .card-approve .card-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 17px;
+      font-weight: 700;
+      color: #a78bfa;
+      margin-bottom: 18px;
+    }
+    .card-approve .card-title .icon { font-size: 22px; }
+    .step-list {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .step {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+    }
+    .step-num {
+      flex-shrink: 0;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: #7c3aed;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .step-text {
+      font-size: 14px;
+      color: #cbd5e1;
+      line-height: 1.6;
+    }
+    .step-text code {
+      background: #2d1f4e;
+      color: #c4b5fd;
+      padding: 2px 7px;
+      border-radius: 5px;
+      font-size: 13px;
+      font-family: 'JetBrains Mono', 'Courier New', monospace;
+    }
+    .step-text strong { color: #e2e8f0; }
+    .warn-box {
+      margin-top: 18px;
+      background: #2d1a00;
+      border: 1px solid #92400e66;
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 13px;
+      color: #fbbf24;
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      line-height: 1.5;
+    }
+
+    /* ── LP 流动性机制卡片 ── */
+    .card-lp {
+      background: linear-gradient(135deg, #0d1f1a 0%, #091510 100%);
+      border-color: #059669 44;
+    }
+    .card-lp .card-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 17px;
+      font-weight: 700;
+      color: #34d399;
+      margin-bottom: 20px;
+    }
+    .card-lp .card-title .icon { font-size: 22px; }
+
+    /* 进度条区域 */
+    .progress-section {
+      margin-bottom: 22px;
+    }
+    .progress-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 8px;
+    }
+    .progress-label {
+      font-size: 13px;
+      color: #94a3b8;
+    }
+    .progress-count {
+      font-size: 22px;
+      font-weight: 800;
+      color: #34d399;
+    }
+    .progress-count span {
+      font-size: 14px;
+      font-weight: 400;
+      color: #64748b;
+    }
+    .progress-bar-bg {
+      width: 100%;
+      height: 10px;
+      background: #1e293b;
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      border-radius: 99px;
+      background: linear-gradient(90deg, #059669, #34d399);
+      transition: width 0.5s ease;
+      /* 示例值 23%，前端对接链上数据后动态设置 */
+      width: 23%;
+    }
+    .progress-sub {
+      margin-top: 6px;
+      font-size: 12px;
+      color: #475569;
+      text-align: right;
+    }
+
+    /* 机制说明行 */
+    .mech-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    @media (max-width: 520px) { .mech-grid { grid-template-columns: 1fr; } }
+    .mech-item {
+      background: #0f2318;
+      border: 1px solid #065f3822;
+      border-radius: 10px;
+      padding: 14px 16px;
+    }
+    .mech-item .mech-label {
+      font-size: 11px;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+    }
+    .mech-item .mech-value {
+      font-size: 15px;
+      font-weight: 700;
+      color: #e2e8f0;
+    }
+    .mech-item .mech-value em {
+      font-style: normal;
+      color: #34d399;
+    }
+
+    /* 流程箭头 */
+    .flow {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 18px;
+    }
+    .flow-step {
+      background: #0f2318;
+      border: 1px solid #059669 33;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 13px;
+      color: #cbd5e1;
+      white-space: nowrap;
+    }
+    .flow-arrow {
+      color: #059669;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+
+    .lock-notice {
+      background: #0f2318;
+      border: 1px solid #05966944;
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 13px;
+      color: #6ee7b7;
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ═══ 卡片一：GOLD_SOURCE 授权说明 ═══ -->
+  <div class="card card-approve">
+    <div class="card-title">
+      <span class="icon">🔐</span>
+      部署前必做：DNAGOLD 授权
+    </div>
+    <div class="step-list">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-text">
+          将授权钱包
+          <code>0xb94173...942e</code>
+          连接到 BNB Smart Chain 网络
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-text">
+          调用 <code>DNAGOLD.approve(<strong>NFTSale合约地址</strong>, 100,000,000 枚)</code><br/>
+          授权合约从此钱包自动划转 DNAGOLD，用于每次铸造时配对注入流动性
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-text">
+          授权完成后无需任何手动操作——每次有人铸造，合约自动从授权钱包划走
+          <code>10,000 DNAGOLD</code>，累积至第 500 次后一键注入 PancakeSwap
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-text">
+          可随时调用 <code>NFTSale.verifyGoldSource()</code> 检查授权余量，
+          余量不足时铸造将自动失败，请及时补充授权
+        </div>
+      </div>
+    </div>
+    <div class="warn-box">
+      ⚠️ 若授权步骤遗漏，任何人发起铸造均会 revert，
+      游戏将完全无法启动。请在部署后、正式公开前完成此操作。
+    </div>
+  </div>
+
+  <!-- ═══ 卡片二：LP 流动性机制说明 ═══ -->
+  <div class="card card-lp">
+    <div class="card-title">
+      <span class="icon">🌊</span>
+      流动性自动开启机制
+    </div>
+
+    <!-- 进度条（前端接链上数据动态渲染） -->
+    <div class="progress-section">
+      <div class="progress-header">
+        <div class="progress-label">创世 AI 生命体诞生进度</div>
+        <div class="progress-count">
+          <!-- 前端替换此数字 -->
+          115
+          <span>/ 500</span>
+        </div>
+      </div>
+      <div class="progress-bar-bg">
+        <!-- width = count/500 * 100%，前端动态计算 -->
+        <div class="progress-bar-fill" style="width: 23%;"></div>
+      </div>
+      <div class="progress-sub">还差 385 个生命体，流动性即将开启</div>
+    </div>
+
+    <!-- 核心数字 -->
+    <div class="mech-grid">
+      <div class="mech-item">
+        <div class="mech-label">每次铸造 BNB 分配</div>
+        <div class="mech-value"><em>80%</em> 注入流动性 &nbsp;·&nbsp; 20% 运营</div>
+      </div>
+      <div class="mech-item">
+        <div class="mech-label">每次铸造配套 DNAGOLD</div>
+        <div class="mech-value"><em>10,000</em> 枚自动配对</div>
+      </div>
+      <div class="mech-item">
+        <div class="mech-label">流动性触发条件</div>
+        <div class="mech-value">第 <em>500</em> 个创世生命体诞生</div>
+      </div>
+      <div class="mech-item">
+        <div class="mech-label">注入平台</div>
+        <div class="mech-value"><em>PancakeSwap</em> V2 · BSC</div>
+      </div>
+    </div>
+
+    <!-- 资金流向 -->
+    <div class="flow">
+      <div class="flow-step">用户铸造 BNB</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">80% 累积至合约</div>
+      <div class="flow-arrow">+</div>
+      <div class="flow-step">10,000 DNAGOLD 自动划入</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">第 500 次触发</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">🥞 PancakeSwap 添加流动性</div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">DNAGOLD 正式开启交易</div>
+    </div>
+
+    <div class="lock-notice">
+      🔒 LP 代币永久锁定于合约内，任何人（包括项目方）均无法提取，
+      流动性永久在线，无法撤池跑路。
+    </div>
+  </div>
+
+</body>
+</html>

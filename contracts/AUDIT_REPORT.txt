@@ -1,0 +1,3498 @@
+
+CodeDNA
+智能合约系统安全审计
+ 
+
+最终综合报告（完整版）
+
+全 12 份合约  ·  62 个安全问题  ·  BNB Smart Chain 主网
+
+
+1. 执行摘要
+CodeDNA 是部署于 BNB Smart Chain 的链上 AI Agent 生态游戏，核心系统由 12 个智能合约构成，涵盖代币、NFT、游戏引擎、经济系统和市场交易。本次审计对全部 12 个合约进行了深度安全分析，共发现 62 个安全问题。
+
+整体评估：系统架构设计完整，合约职责分离清晰，经济模型设计合理。但在资金安全、跨合约状态同步和重入防护方面存在多处需要立即修复的高危漏洞，特别是 NFTSale 和 NFTMarket 两个直接持有/处理真实 BNB 的合约问题最为紧迫。
+
+1.1 全 12 合约问题总览
+
+统计：11 个高风险 · 18 个中风险 · 33 个低风险 · 合计 62 个问题
+
+1.2 风险分布与重点合约
+
+2. P0 紧急修复清单（7 日内）
+以下 7 项为全系统最高优先级漏洞，需在 7 日内完成修复，其中 NFTSale 和 NFTMarket 的两项需在任何真实购买交易发生前优先处理。
+
+
+3. 跨合约攻击链（7 条）
+本节分析合约间漏洞叠加后形成的完整攻击路径。相比第一版报告，新增合约引入了 2 条新攻击链。
+
+
+4. 完整问题清单（62 项）
+以下为全部 12 份合约所有已发现问题的索引表，按合约编号排列。标注 [P0] 的为最高优先级紧急修复项。
+
+
+5. 三阶段修复路线图（更新版）
+第一阶段：立即修复（0-7 天）
+以下 9 项为最高优先级，需立即处理。特别注意 NFTSale 和 NFTMarket 的问题须在下一次真实 BNB 购买前完成修复。
+
+
+第二阶段：重要修复（7-30 天）
+
+第三阶段：优化与增强（30-90 天）
+包含所有低风险问题的修复，以及系统性安全增强措施：
+
+• 全合约 owner 迁移至 Gnosis Safe 多签钱包（2/3 或 3/5）
+• BehaviorEngine / NFTMarket / NFTSale 添加 OpenZeppelin Pausable 紧急暂停机制
+• EconomyEngine Halving 触发添加 TimeLock（48 小时）并 emit 事件供社区监督
+• WorldMap 双写不一致修复（plotAgentCount + agentOnMap 原子更新）
+• FamilyTracker 添加 removeAgent 时清除亲属数据逻辑
+• NFTMarket 手续费修改添加 TimeLock 保护
+• ReproductionEngine 添加繁殖区块冷却（REPRODUCE_COOLDOWN）
+• NFTSale 添加每钱包铸造上限（maxPerWallet）
+• 部署链上多合约集成测试套件，覆盖所有跨合约攻击链场景
+• 建立持续安全监控（Tenderly / OpenZeppelin Defender Alerts）
+
+联动修复组（建议同批提交）
+
+6. 附录：合约地址完整速查（12 份）
+
+注：合约 #1 和 #9 对应同一链上地址（0x660AA...），属同一 DNAGold 合约的两轮独立审计。
+
+— CodeDNA 系统审计最终报告（完整版 v2.0）— 机密文件，仅供内部使用 —
+审计范围 | 全 12 个 CodeDNA 智能合约
+区块链网络 | BNB Smart Chain 主网（BSC，Chain ID 56）
+审计周期 | 2026-03-04 ～ 2026-03-05
+问题总数 | 62 个（11 高 / 18 中 / 33 低）
+P0 紧急修复 | 7 项（含新增 NFTSale/NFTMarket 资金风险）
+报告版本 | v2.0（新增合约 #10/#11/#12）
+报告日期 | 2026-03-05
+# | 合约名称 | 地址 | 高 | 中 | 低 | 合计 | 核心风险
+1 | DNAGold | 0x660AA...e96B6 | 2 | 2 | 2 | 6 | mintFree 无供应上限（P0）
+2 | GenesisCore | 0x4033A...91f185 | 1 | 2 | 3 | 6 | 初始化时序 · 属性操控
+3 | WorldMap | 0x9C3eD...593c297 | 1 | 2 | 3 | 6 | 双写不一致 · removeAgent 残留
+4 | FamilyTracker | 0x7D711...9DD7 | 1 | 2 | 2 | 5 | 亲属检查深度 · 数据残留
+5 | EconomyEngine | 0x615DB...977F7a | 2 | 2 | 3 | 7 | Halving DoS · 奖励取整
+6 | DeathEngine | 0x03b15...b32c | 2 | 2 | 2 | 6 | try-catch 吞失败 · 饥饿死亡
+7 | BehaviorEngine | 0x293fb...EA4D77 | 2 | 3 | 3 | 8 | 无冷却采集 · 批次饥饿（P0）
+8 | AgentBridge | 0x319881...B23CE | 2 | 2 | 2 | 6 | 重入解锁 · 冷却初始化（P0）
+9 | DNAGold (v2) | 0x660AA...e96B6 | 2 | 2 | 2 | 6 | 同合约 #1 补充审计
+10 | ReproductionEngine | 0x7873E...1c04 | 1 | 3 | 3 | 7 | 亲属检查仅2层 · 繁殖无费用
+11 | NFTSale | 0xcBe90...d7de | 2 | 3 | 2 | 7 | ⚠️ 超额BNB无退款 · 提款锁定
+12 | NFTMarket | 0x90A7f...7371 | 2 | 3 | 3 | 8 | ⚠️ 重入购买 · 幽灵挂单
+风险类别 | 高风险 | 中风险 | 低风险 | 典型漏洞
+资金直接损失 | 5 | 4 | 0 | 重入购买 · 超额BNB无退款 · 提款锁定
+经济模型破坏 | 4 | 6 | 5 | 无限铸造 · 批次饥饿 · 繁殖无费用
+状态不同步 | 2 | 5 | 12 | 死亡后挂单残留 · WorldMap双写 · FamilyTracker数据残留
+权限与访问控制 | 0 | 3 | 8 | 手续费无上限 · owner单签 · gameContract权限
+DoS / Gas 耗尽 | 0 | 0 | 8 | Halving gas · 批次采集循环 · Reproduce gas
+编号 | 合约 | 问题 | 危害 | 修复方案
+BE-P1 | BehaviorEngine | lastGatherBlock=0 初始化缺失 | 批次饥饿窗口将在部署后约7天开启，届时可免费Gather | placeAgent 时设 lastGatherBlock = block.number
+BE-P3 | BehaviorEngine | gather 无区块冷却 | 可无限循环采集 DNAGOLD，彻底破坏通缩模型 | 加 GATHER_COOLDOWN = 200 区块冷却检查
+DG-P1 | DNAGold | mintFree 无 MAX_SUPPLY 校验 | 可无限铸造 DNAGOLD，彻底通胀 | require(totalSupply() + amount <= MAX_SUPPLY)
+AB-P1 | AgentBridge | claimUnlocked 无 CEI / 重入 | 重入攻击可多次提取锁仓 DNAGOLD | delete lockedBalance 先于 transfer；加 nonReentrant
+DE-P1 | DeathEngine | try-catch 吞失败 | 死亡通知丢失 → Agent 僵尸状态 · NFTMarket 幽灵挂单 | 移除 try-catch，改为显式 revert 或事件+补偿机制
+NS-P2/P4 | NFTSale | 超额BNB无退款 + 提款函数需确认 | ⚠️ 用户多付BNB被锁 · 0.4 BNB合约留存无法提取 | 加退款逻辑；立即确认 withdraw() 函数存在
+NM-P1/P2 | NFTMarket | 幽灵挂单 + 购买重入 | ⚠️ NFT转走后买家损失BNB；重入可多次购买 | 改Escrow模式；delete listings 先于所有外部调用
+ | 攻击链 | 名称 | 涉及漏洞 | 攻击路径 | 危险度 | 时限
+🔴 | Chain 1 | 批次饥饿死亡链 | BE-P1 + DE-P2 | BE-P1（lastGatherBlock=0）→ 7天后Agent无法Gather → 能量耗尽 → DE-P2饥饿判定 → Agent集体死亡 | 高 | 立即
+🔴 | Chain 2 | 无限DNAGOLD通胀链 | BE-P3 + EE-P1 + DG-P1 | gather无冷却→无限采集→EE奖励逻辑失效→mintFree无上限→DNAGOLD彻底通胀 | 极高 | 立即
+🟠 | Chain 3 | 僵尸Agent链 | DE-P1 + WorldMap + EconomyEngine | try-catch吞失败→死亡通知丢失→Agent僵尸状态→占据地图位置→影响经济稀释因子 | 中 | 7天内
+🟠 | Chain 4 | 锁仓余额劫持链 | DG-P2 + AB-P1 | DNAGold锁仓记录可被篡改→AgentBridge重入提取→多次领取锁仓奖励 | 高 | 立即
+🟠 | Chain 5 | Halving Gas DoS 链 | EE-P2 + BE-P2 | EconomyEngine halving无gas上限→BehaviorEngine reproduce/gather调用OOG→功能全面停滞 | 中 | 30天内
+🔴 | Chain 6 | NFT市场资金损失链（新） | NM-P1 + NM-P2 + DE-P1 | 幽灵挂单+购买重入+死亡Agent挂单残留→买家BNB损失+NFT被多次转移 | 极高 | buyAgent上线前
+🟠 | Chain 7 | 创世销售资金锁定链（新） | NS-P2 + NS-P4 + NS-P3 | 超额BNB无退款+提款函数缺失+收益分成重入→用户资金被锁+合约BNB无法提取 | 高 | 立即确认
+序 | 编号 | 合约 | 级别 | 问题描述 | 标注
+1 | DG-P1 | DNAGold | 高 | mintFree 无 MAX_SUPPLY 校验——无限铸造通胀 | [P0]
+2 | DG-P2 | DNAGold | 高 | lockBalance 可被 gameContract 任意写入——锁仓数据可操控 | 
+3 | DG-P3 | DNAGold | 中 | transferFrom 绕过 locked 余额检查 | 
+4 | DG-P4 | DNAGold | 中 | owner 可随时更换 gameContract——无时间锁 | 
+5 | DG-P5 | DNAGold | 低 | 无铸造事件精细化日志 | 
+6 | DG-P6 | DNAGold | 低 | 缺少 burn 机制——无通缩出口 | 
+7 | GC-P1 | GenesisCore | 高 | mintGenesis 时序依赖——初始化窗口可被抢占 | 
+8 | GC-P2 | GenesisCore | 中 | getAttributes 返回值未验证边界 | 
+9 | GC-P3 | GenesisCore | 中 | agentEnergy 可被 gameContract 超额设置 | 
+10 | GC-P4 | GenesisCore | 低 | 属性随机熵不足（block.prevrandao） | 
+11 | GC-P5 | GenesisCore | 低 | totalGenesisCount 与 totalTokenCount 语义混淆 | 
+12 | GC-P6 | GenesisCore | 低 | 缺少 Pausable 紧急冻结机制 | 
+13 | WM-P1 | WorldMap | 高 | agentLocation 可被覆盖——跨 Agent 位置冲突 | 
+14 | WM-P2 | WorldMap | 中 | plotAgentCount 与 agentOnMap 双写不一致 | 
+15 | WM-P3 | WorldMap | 中 | removeAgent 不同步 plotAgentCount | 
+16 | WM-P4 | WorldMap | 低 | plotMultiplier 无上限——可设超大稀释绕过 | 
+17 | WM-P5 | WorldMap | 低 | getManhattanDistance 溢出（未检查负坐标） | 
+18 | WM-P6 | WorldMap | 低 | 缺少批量查询接口——高频调用 gas 浪费 | 
+19 | FT-P1 | FamilyTracker | 高 | isDirectRelative 仅2层检查——祖孙/兄弟可配对 | 
+20 | FT-P2 | FamilyTracker | 中 | registerBirth 无重复注册保护 | 
+21 | FT-P3 | FamilyTracker | 中 | removeAgent 不清理亲属数据——数据残留 | 
+22 | FT-P4 | FamilyTracker | 低 | familyRoot 计算逻辑可被伪造 | 
+23 | FT-P5 | FamilyTracker | 低 | 缺少家族树深度限制 | 
+24 | EE-P1 | EconomyEngine | 高 | 奖励取整损失累积——长期稀释玩家收益 | 
+25 | EE-P2 | EconomyEngine | 高 | Halving 循环无 gas 限制——可触发 OOG DoS | 
+26 | EE-P3 | EconomyEngine | 中 | dilutionFactor 可被 gameContract 直接写入 | 
+27 | EE-P4 | EconomyEngine | 中 | incrementBorn/incrementDied 无原子性保护 | 
+28 | EE-P5 | EconomyEngine | 低 | 缺少历史奖励快照机制 | 
+29 | EE-P6 | EconomyEngine | 低 | baseReward 无最低保障值 | 
+30 | EE-P7 | EconomyEngine | 低 | halving 触发事件缺失 | 
+31 | DE-P1 | DeathEngine | 高 | executeDeath try-catch 吞失败——僵尸 Agent | [P0]
+32 | DE-P2 | DeathEngine | 高 | 饥饿判定使用 lastEatBlock——可被操控延缓死亡 | 
+33 | DE-P3 | DeathEngine | 中 | batchCheckDeath 无 Agent 数量上限 | 
+34 | DE-P4 | DeathEngine | 中 | isDead 状态可被 gameContract 重置 | 
+35 | DE-P5 | DeathEngine | 低 | 死亡事件缺少时间戳 | 
+36 | DE-P6 | DeathEngine | 低 | 缺少批量死亡 gas 上限保护 | 
+37 | BE-P1 | BehaviorEngine | 高 | lastGatherBlock 初始化为0——批次饥饿窗口 | [P0]
+38 | BE-P2 | BehaviorEngine | 高 | reproduce 无 gas 上限——可触发 OOG | 
+39 | BE-P3 | BehaviorEngine | 中 | gather 无区块冷却——无限采集 DNAGOLD | [P0]
+40 | BE-P4 | BehaviorEngine | 中 | move 无距离限制——可瞬间穿越地图 | 
+41 | BE-P5 | BehaviorEngine | 中 | eat 无冷却——无限回能量 | 
+42 | BE-P6 | BehaviorEngine | 低 | 属性加成计算精度损失 | 
+43 | BE-P7 | BehaviorEngine | 低 | 缺少 gather 事件精细化日志 | 
+44 | BE-P8 | BehaviorEngine | 低 | batchGather 无最大批次限制 | 
+45 | AB-P1 | AgentBridge | 高 | claimUnlocked 无 CEI——重入提取锁仓余额 | [P0]
+46 | AB-P2 | AgentBridge | 高 | unlockSchedule 可被 gameContract 覆盖 | 
+47 | AB-P3 | AgentBridge | 中 | lastClaimBlock 初始化为0——立即可提取 | 
+48 | AB-P4 | AgentBridge | 中 | 批量解锁无 Agent 数量上限 | 
+49 | AB-P5 | AgentBridge | 低 | 解锁事件缺少接收者地址 | 
+50 | AB-P6 | AgentBridge | 低 | 缺少紧急暂停提款机制 | 
+51 | RE-P1 | ReproductionEngine | 高 | 亲属检查仅2层——祖孙/兄弟可繁殖破坏平衡 | 
+52 | RE-P2 | ReproductionEngine | 中 | 繁殖无区块冷却——可瞬间完成所有繁殖配额 | 
+53 | RE-P3 | ReproductionEngine | 中 | 同宿主检查不严——可消耗他人Agent繁殖次数 | 
+54 | RE-P4 | ReproductionEngine | 中 | 繁殖费用逻辑需确认——若缺失则零成本繁殖 | [P0确认]
+55 | RE-P5 | ReproductionEngine | 低 | 属性遗传为均值——可选择性繁殖堆高属性 | 
+56 | RE-P6 | ReproductionEngine | 低 | 与BehaviorEngine职责边界不清晰 | 
+57 | RE-P7 | ReproductionEngine | 低 | 死亡Agent繁殖状态未清除 | 
+58 | NS-P1 | NFTSale | 高 | 铸造价格硬编码风险——价格更新需重新部署 | 
+59 | NS-P2 | NFTSale | 高 | 超额BNB支付无退款——用户多付被永久锁定 | [P0]
+60 | NS-P3 | NFTSale | 中 | 收益分成call{value}——重入风险 | 
+61 | NS-P4 | NFTSale | 中 | withdraw函数需确认——0.4 BNB可能永久锁定 | [P0确认]
+62 | NS-P5 | NFTSale | 中 | 50,000 DNAGOLD分发逻辑需确认 | [P0确认]
+63 | NS-P6 | NFTSale | 低 | 无每钱包铸造上限——可垄断Genesis Agent | 
+64 | NS-P7 | NFTSale | 低 | 缺少销售暂停机制 | 
+65 | NM-P1 | NFTMarket | 高 | approve挂单模式——NFT可转移买家损失BNB | [P0]
+66 | NM-P2 | NFTMarket | 高 | buyAgent购买重入——恶意卖家多次购买 | [P0]
+67 | NM-P3 | NFTMarket | 中 | 死亡Agent挂单未撤销——幽灵挂单 | 
+68 | NM-P4 | NFTMarket | 中 | 手续费可设为100%无上限 | 
+69 | NM-P5 | NFTMarket | 中 | 超额BNB支付无退款 | 
+70 | NM-P6 | NFTMarket | 低 | 挂单价格无最低限制——零价格挂单 | 
+71 | NM-P7 | NFTMarket | 低 | 缺少市场全局暂停机制 | 
+72 | NM-P8 | NFTMarket | 低 | 在场Agent挂单后未离场——状态不同步 | 
+编号 | 合约 | 修复方案
+BE-P1 | BehaviorEngine | placeAgent 时设 lastGatherBlock = block.number
+BE-P3 | BehaviorEngine | gather 加 GATHER_COOLDOWN = 200 区块冷却
+DG-P1 | DNAGold | mintFree 加 MAX_SUPPLY 校验
+AB-P1 | AgentBridge | claimUnlocked 改 CEI 模式 + nonReentrant
+DE-P1 | DeathEngine | 移除 try-catch，改显式 revert / 事件补偿
+NS-P2 | NFTSale | buyAgent 加超额退款逻辑
+NS-P4 | NFTSale | 立即确认 withdraw() 存在且为 onlyOwner
+NM-P1 | NFTMarket | 改 Escrow 模式（listAgent 时 NFT 转入合约托管）
+NM-P2 | NFTMarket | buyAgent：delete listings 先于所有外部调用 + nonReentrant
+编号 | 合约 | 修复方案
+RE-P1 | ReproductionEngine | 升级 isDirectRelative → isCloseRelative（含 familyRoot + 共同父母检查）
+RE-P3 | ReproductionEngine | listAgent / buyAgent 双方宿主校验严格化
+RE-P4 | ReproductionEngine | 确认繁殖费用 transferFrom/burn 逻辑存在
+NM-P3 | NFTMarket | buyAgent 加 isDead 检查；DeathEngine 死亡时回调取消挂单
+NM-P4 | NFTMarket | 加 MAX_FEE 常量（≤10%）；feeRecipient 迁移多签
+EE-P1/P2 | EconomyEngine | 奖励计算加精度保护；Halving 循环加 gas 上限
+AB-P3 | AgentBridge | lastClaimBlock 初始化修复（同 BE-P1 联合提交）
+NS-P1 | NFTSale | 统一价格来源为 GenesisCore.getGenesisPrice()
+NS-P3 | NFTSale | 收益分成改为 Pull Payment 模式消除重入
+修复组 | 涉及漏洞 | 原因
+组 A | BE-P1 + AB-P3 | lastGatherBlock 和 lastClaimBlock 均为初始化为0的同类问题，同批修复避免遗漏
+组 B | DE-P1 + WM-P3 + NM-P3 | 死亡通知链路修复：DeathEngine正确通知 → WorldMap同步 → NFTMarket取消挂单
+组 C | EE-P2 + BE-P2 | Halving gas限制和reproduce gas限制均影响BehaviorEngine调用，需协调gas预算
+组 D | DG-P1 + EE-P1 | mintFree无上限与奖励精度共同破坏通缩模型，修复时需重新校准经济参数
+组 E（新） | NS-P2 + NM-P5 | NFTSale和NFTMarket均有超额BNB退款问题，统一退款逻辑模板同批修复
+组 F（新） | NM-P1 + NM-P2 + NM-P7 | NFTMarket核心交易安全（Escrow模式+CEI+暂停），三项必须同批完成才能安全开放
+# | 合约名称 | 功能 | BSC 合约地址
+1 | DNAGold | BEP-20 代币 | 0x660AA4225956975171deE3D78612c7B58c5e96B6
+2 | GenesisCore | Agent NFT（ERC-721） | 0x4033AFaFAb90191a4982CdAfa5Cb4E117A91f185
+3 | WorldMap | 地图与坐标管理 | 0x9C3eD84D6BFDDD425b46a94052f725B23593c297
+4 | FamilyTracker | 家族树管理 | 0x7D71118205FECBF4B62c2a5157c170588c6e9DD7
+5 | EconomyEngine | 经济奖励引擎 | 0x615DBE2117c8D68514bA14aC8f9E026045977F7a
+6 | DeathEngine | 死亡判定引擎 | 0x03b15E325EDF110897bf527E2dA08b1D6f60b32c
+7 | BehaviorEngine | 行为执行引擎 | 0x293fbFC88E6d6E01b9428806D7F1F93C23EA4D77
+8 | AgentBridge | 锁仓解锁桥接 | 0x319881A6F66a832f4f09Ad94128Fb01b1bEB23CE
+9 | DNAGold (v2) | 代币（同 #1） | 0x660AA4225956975171deE3D78612c7B58c5e96B6
+10 | ReproductionEngine | 繁殖引擎 | 0x7873ECE552C11C31Fb37822c8B5c699b4Fd51c04
+11 | NFTSale | 创世 Agent 一级销售 | 0xcBe90d6F542FCaafCdaCd569EeA66B87af56d7de
+12 | NFTMarket | Agent NFT 二级市场 | 0x90A7f9025D9a57508Aba43126f58DaB032C37371
+
+
+
+
+========== CodeDNA_Audit_01_DNAGold.txt ==========
+
+
+CodeDNA 智能合约安全审计报告
+ 
+
+合约 #1 — DNAGold (DNAGOLD)
+BNB Smart Chain 主网
+
+
+1. 审计概述
+本次审计针对 CodeDNA 项目在 BNB Smart Chain 主网部署的 DNAGold (DNAGOLD) 代币合约进行全面的安全分析，涵盖：
+• 源代码逐行审查（基于 BscScan 已验证源码）
+• 与设计文档的一致性核对
+• 权限控制与访问控制分析
+• 代币经济模型安全性评估
+• 跨合约交互风险识别
+• 重入攻击、整数溢出等常见漏洞检查
+
+
+2. 链上实时状态
+
+3. 设计文档一致性核查
+以下表格对合约实际实现与设计文档中每一项规格进行逐一比对：
+
+
+4. 安全风险详情
+本节对所有发现的问题进行详细说明。问题按风险等级排序：🔴 高风险 → 🟡 中风险 → 🟢 低风险
+
+问题描述
+onlyGame modifier 同时授权了 gameContract（BehaviorEngine）和 economyContract（EconomyEngine）。问题在于这两个合约拥有完全相同的权限级别，但 EconomyEngine 在设计上只需要调用 addLocked() 来发放采集奖励，完全不需要 burnLocked、transferLocked 和 mintFree 这三个高危函数的权限。
+这违反了「最小权限原则」——每个组件只应拥有完成其职能所必需的最小权限集。
+相关代码
+modifier onlyGame() {
+    if (msg.sender != gameContract && msg.sender != economyContract) revert OnlyGame();
+    _;
+}
+
+// 以下三个危险函数均受上述 modifier 保护，economyContract 可无限制调用：
+function burnLocked(uint256 agentId) external onlyGame { ... }     // 可销毁任意 Agent 全部资产
+function transferLocked(uint256 fromAgent, uint256 toAgent, uint256 amount) external onlyGame { ... }  // 可转移任意 Agent 资产
+function mintFree(address to, uint256 amount) external onlyGame { ... }  // 可转出奖励池代币
+影响分析
+如果 EconomyEngine 合约存在任何安全漏洞（重入攻击、逻辑缺陷、被恶意替换），攻击者可以：
+① 调用 burnLocked(任意 agentId) → 清空目标 Agent 的全部锁定余额
+② 调用 transferLocked(受害者 agentId, 攻击者 agentId, amount) → 将他人资产强制转移给自己
+③ 调用 mintFree(攻击者地址, amount) → 将奖励池（当前约 8.5 亿 DNAGOLD）直接提取到钱包
+当前 EconomyEngine 合约有 448 笔交易正在运行，攻击面实际存在且处于活跃状态。
+修复建议
+拆分 modifier，为不同函数赋予最小所需权限：
+
+modifier onlyGame() {
+    if (msg.sender != gameContract) revert OnlyGame();  // 仅 BehaviorEngine
+    _;
+}
+
+modifier onlyGameOrEconomy() {
+    if (msg.sender != gameContract && msg.sender != economyContract) revert OnlyGame();
+    _;
+}
+
+// 只有 addLocked 开放给 EconomyEngine，其余全部锁死
+function addLocked(...) external onlyGameOrEconomy { ... }
+function spendLocked(...) external onlyGame { ... }
+function burnLocked(...) external onlyGame { ... }
+function transferLocked(...) external onlyGame { ... }
+function mintFree(...) external onlyGame { ... }
+
+问题描述
+addLocked() 直接调用 _transfer(gameContract, address(this), amount) 而不事先检查 gameContract 的 ERC-20 余额是否充足。当奖励池（gameContract 持有的余额）不足时，OpenZeppelin ERC20 的 _transfer 会因余额不足而 revert，导致整个 gather() 交易回滚。
+相关代码
+function addLocked(uint256 agentId, uint256 amount) external onlyGame {
+    if (amount == 0) revert ZeroAmount();
+    _transfer(gameContract, address(this), amount);  // ← 无余额检查，直接 transfer
+    lockedBalance[agentId] += amount;
+    emit LockedAdded(agentId, amount);
+}
+影响分析
+连锁崩溃路径：
+gather() → rewardAgent() → addLocked() → _transfer() revert → gather() 整体回滚
+最关键的是：gather() 执行时已写入 lastGatherBlock（冷却计时器已触发），Agent 需要等待 4800 块（约 4 小时）才能重试。
+奖励池快速耗尽场景：大量 Agent 同时 gather 导致池子临界时，第一笔超出余额的交易 revert，但冷却已触发。该 Agent 在冷却期内无法操作，重试时仍然失败（池子依然不足），形成永久死循环。
+这不是理论风险——当前奖励池有 849,986,140 枚，但随着 Agent 数量增长会持续消耗。
+修复建议
+在 EconomyEngine.rewardAgent() 中增加余额预检查，不足时静默跳过（优雅降级）：
+
+function rewardAgent(uint256 agentId, uint256 totalAmount) external onlyBehavior {
+    uint256 poolBalance = dnagold.balanceOf(gameContract);
+    if (poolBalance < totalAmount) return;  // 余额不足时静默跳过，不 revert
+    ...
+}
+
+或在 addLocked 中增加判断：
+function addLocked(uint256 agentId, uint256 amount) external onlyGame {
+    if (amount == 0) revert ZeroAmount();
+    uint256 poolBal = balanceOf(gameContract);
+    if (poolBal < amount) return;  // 静默跳过，不 revert
+    _transfer(gameContract, address(this), amount);
+    lockedBalance[agentId] += amount;
+    emit LockedAdded(agentId, amount);
+}
+
+问题描述
+mintFree() 函数名称暗示这是一个增发（铸币）操作，但实际实现是从 gameContract 的 ERC-20 余额中做一次 _transfer()，不增发任何新代币，总供应量不变。
+相关代码
+function mintFree(address to, uint256 amount) external onlyGame {
+    if (to == address(0)) revert ZeroAddress();
+    if (amount == 0) revert ZeroAmount();
+    _transfer(gameContract, to, amount);  // ← 这是 transfer！不是 mint！
+    emit FreeMinted(to, amount);           // ← 事件名也叫 FreeMinted，进一步混淆
+}
+影响分析
+前端或第三方集成者看到 mintFree 和 FreeMinted 事件会误认为发生了增发，导致对供应量的错误计算。
+区块链分析工具监听 FreeMinted 事件时，可能错误地将这些 transfer 归类为增发，污染供应量统计数据。
+安全审计人员需要花费额外时间排查「增发是否受控」这一问题，增加审计成本和误报风险。
+修复建议
+将函数名和事件名改为准确反映行为的名称：
+
+// 修改前
+function mintFree(address to, uint256 amount) external onlyGame
+event FreeMinted(address indexed to, uint256 amount)
+
+// 修改后（建议）
+function distributeFromPool(address to, uint256 amount) external onlyGame
+event PoolDistributed(address indexed to, uint256 amount)
+
+// 或者至少在注释中极其明确地说明：
+/// @dev 警告：此函数不增发代币，仅从 gameContract 奖励池转账
+/// @dev WARNING: NOT a mint. Transfers from reward pool (gameContract) to recipient.
+
+问题描述
+lockedBalance 声明为 public，任何外部地址都可以不花 gas 地查询任意 agentId 的锁定余额，获得全部 Agent 的财富排名信息。
+相关代码
+mapping(uint256 => uint256) public lockedBalance;  // ← public，全公开
+影响分析
+攻击者可以部署一个脚本，枚举所有 agentId（0 到当前 totalTokenCount），批量查询每个 Agent 的 lockedBalance，构建完整的「Agent 财富排行榜」。
+针对排行最高的 Agent，攻击者可以优先等待其进入 dying window，然后第一时间调用 claimDeathBounty() 清空其锁定余额并获得 50 DNAGOLD 赏金。
+这本身是区块链透明度的正常特性，但需要在设计文档里明确记录「这是有意为之的设计决策」，否则未来审计会反复提出此问题。
+修复建议
+如果这是有意为之的游戏机制设计（链上透明），请在合约注释和设计文档中明确说明，例如：
+
+/// @dev lockedBalance 故意设为 public，允许任何人查询 Agent 财富。
+/// 这是游戏机制的一部分：Agent 的财富是公开可见的，
+/// 允许其他 Agent 做出针对性的掠夺决策。
+
+如果不希望链上可见，改为 internal 并提供 getter 函数（但实际效果相同，只是增加调用步骤）：
+mapping(uint256 => uint256) internal _lockedBalance;
+function lockedBalance(uint256 agentId) external view returns (uint256) {
+    return _lockedBalance[agentId];
+}
+
+问题描述
+合约中有两种销毁路径，行为不一致：spendLocked（消费销毁）使用 _burn()，而 burnLocked（死亡销毁）使用 _transfer(address(this), DEAD_ADDRESS)。
+相关代码
+// 消费销毁（eat/reproduce）— 正确减少 totalSupply
+function spendLocked(uint256 agentId, uint256 amount) external onlyGame {
+    ...    
+    _burn(address(this), amount);  // totalSupply 减少 ✅
+}
+
+// 死亡销毁 — totalSupply 不变，代币困在 0xdead
+function burnLocked(uint256 agentId) external onlyGame {
+    ...
+    _transfer(address(this), DEAD_ADDRESS, amount);  // totalSupply 不变 ⚠️
+}
+影响分析
+调用 totalSupply() 查询总供应量时，死亡销毁的代币仍然计算在内，导致统计值虚高。
+前端显示「已销毁代币数量」时，需要额外查询 balanceOf(0xdead) 才能得到完整的销毁数据，增加了前端集成的复杂度。
+这两种销毁机制的不一致性会让未来的审计人员和集成方产生疑惑，需要额外解释。
+修复建议
+这是一个需要和团队确认的设计决策，存在两种合理选择：
+
+选项A — 统一使用 _burn()（totalSupply 准确反映流通量）：
+function burnLocked(uint256 agentId) external onlyGame {
+    uint256 amount = lockedBalance[agentId];
+    if (amount == 0) return;
+    lockedBalance[agentId] = 0;
+    _burn(address(this), amount);  // totalSupply 同步减少
+    emit LockedBurned(agentId, amount);
+}
+
+选项B — 维持现状并明确记录（0xdead 余额可公开查询，方便追踪死亡销毁量）：
+在注释中说明两种销毁的语义差异，并在设计文档中注明 totalSupply 包含发往 0xdead 的代币。
+
+问题描述
+addLocked、spendLocked、burnLocked、mintFree 均有对应的事件，唯独 transferLocked（用于 raid 掠夺场景）没有发出任何事件。
+相关代码
+function transferLocked(uint256 fromAgent, uint256 toAgent, uint256 amount) external onlyGame {
+    if (amount == 0) revert ZeroAmount();
+    uint256 bal = lockedBalance[fromAgent];
+    if (bal < amount) revert InsufficientLocked(fromAgent, bal, amount);
+    lockedBalance[fromAgent] = bal - amount;
+    lockedBalance[toAgent]  += amount;
+    // ← 没有 emit 任何事件！
+}
+影响分析
+前端无法通过监听事件来实时展示掠夺结果（攻击者获得了多少代币、受害者损失了多少）。
+raid 是游戏里最戏剧性的行为之一，缺少事件意味着文明史诗叙事系统无法自动触发掠夺相关的叙事事件。
+前端只能通过轮询 lockedBalance 来检测变化，每个 Agent 每次状态更新都要发一次 RPC 请求，成本极高。
+修复建议
+增加 LockedTransferred 事件并在 transferLocked 中 emit：
+
+event LockedTransferred(
+    uint256 indexed fromAgent,
+    uint256 indexed toAgent,
+    uint256 amount
+);
+
+function transferLocked(uint256 fromAgent, uint256 toAgent, uint256 amount) external onlyGame {
+    ...
+    lockedBalance[fromAgent] = bal - amount;
+    lockedBalance[toAgent]  += amount;
+    emit LockedTransferred(fromAgent, toAgent, amount);  // ← 添加这一行
+}
+
+问题描述
+合约没有维护一个直接可查的 totalLockedSupply 变量来表示「所有 Agent 锁定余额的总和」。要获得这个值，只能调用 balanceOf(address(this))，但这个调用的语义是「合约自身的 ERC-20 余额」，而不是「所有 Agent 锁定总量」，二者在语义上存在混淆。
+影响分析
+前端开发者需要了解「DNAGold 合约的 ERC-20 余额 = 所有 Agent 的锁定余额总和」这一间接关系，增加了理解成本。
+未来如果合约逻辑发生变化（如部分锁定代币在合约内有其他用途），这个间接关系可能失效，导致数据误读。
+修复建议
+增加 totalLockedSupply 变量，在相关函数中同步更新：
+
+uint256 public totalLockedSupply;  // 新增
+
+function addLocked(...) external onlyGame {
+    ...
+    lockedBalance[agentId] += amount;
+    totalLockedSupply += amount;  // 新增
+}
+
+function spendLocked(...) external onlyGame {
+    ...
+    lockedBalance[agentId] = bal - amount;
+    totalLockedSupply -= amount;  // 新增
+}
+
+function burnLocked(...) external onlyGame {
+    ...
+    lockedBalance[agentId] = 0;
+    totalLockedSupply -= amount;  // 新增
+}
+
+5. 总结与优先级建议
+5.1 整体评估
+DNAGold 合约的基础架构设计是合理的：总量固定、双态分离清晰、使用 OpenZeppelin 成熟库、重入防护到位。合约的核心设计目标（固定供应量、锁定/解锁双态、死亡销毁）均已正确实现。
+但存在两个高风险点需要立即处理，以及三个中风险点需要在下一个合约版本中修复。
+
+5.2 优先级修复顺序
+
+5.3 与其他合约的关联风险
+DNAGold 是整个 CodeDNA 系统的资产层，以下关联风险需要跨合约处理：
+• P-1（权限过度） 与 EconomyEngine 直接相关——EconomyEngine 的安全性直接影响 DNAGold 所有 Agent 的资产安全。
+• P-2（余额检查） 需要在 EconomyEngine.rewardAgent() 中实施，而不是在 DNAGold 内部。
+• P-6（缺少事件） 影响 BehaviorEngine 的 raid() 行为——前端依赖此事件展示掠夺结果。
+
+附录：完整源码关键函数速查
+以下为 DNAGold.sol 所有公开函数的快速参考：
+
+
+— 审计报告结束 —
+合约地址 | 0x660AA4225956975171deE3D78612c7B58c5e96B6
+合约名称 | DNAGold.sol
+编译器版本 | v0.8.24+commit.e11b9ed9
+部署时间 | 2026-03-04（约17小时前）
+部署者 | 0xa172aBd7...2159ebB07
+审计日期 | 2026-03-05
+审计轮次 | 第1轮（共9合约逐一审计）
+审计范围 | 详情
+合约文件 | DNAGold.sol（主合约）+ OZ ERC20 标准库（File 2-6，未修改）
+审计深度 | 全量源码审计，逐函数分析，覆盖所有状态变量、modifier 和外部调用
+链上验证 | 实时查询合约余额、交易记录、内部调用（基于 BscScan 实时数据）
+不在审计范围 | OpenZeppelin 标准库内部实现（已充分验证的标准代码）
+指标 | 当前数据
+直接交易数 | 1 笔（NFTSale 对 PancakeSwap 的 Approve）
+合约持有 DNAGOLD | 12,473.33 DNAGOLD（= 当前所有存活 Agent 锁定余额总和）
+内部交易驱动 | BehaviorEngine 448 笔 gather/reproduce → 触发 addLocked/spendLocked/mintFree
+奖励池余额 | 849,986,140.75 DNAGOLD（BehaviorEngine 持有，约占总量 85%）
+部署者 | 0xa172aBd78faeb86039f99b04b3089522159ebB07
+检查项 | 设计文档要求 | 合约实际值 | 状态
+固定总量 | 1,000,000,000 DNAGOLD | TOTAL_SUPPLY = 1e9 × 1e18 | ✅
+奖励池分配 | 85% → gameContract | GAME_SHARE = 850,000,000e18 | ✅
+LP储备分配 | 10% → lpReserveAddress | LP_SHARE = 100,000,000e18 | ✅
+团队储备分配 | 5% → teamReserveAddress | TEAM_SHARE = 50,000,000e18 | ✅
+永不增发 | 构造函数后无 mint | 无 mint 函数，仅构造时一次 _mint | ✅
+锁定态系统 | lockedBalance[agentId] | mapping(uint256=>uint256) lockedBalance | ✅
+解锁态系统 | 标准 ERC-20 | 继承 OZ ERC20 | ✅
+死亡烧毁目标 | 发送至 0xdead | DEAD_ADDRESS = 0x000...dEaD | ✅
+权限控制 | 仅 gameContract 可操作 | onlyGame modifier（含 economyContract） | ⚠️ 见 P-1
+重入防护 | 先清账再操作 | spendLocked/burnLocked 均先清零 | ✅
+transferLocked 事件 | 应有事件记录 | 无 LockedTransferred 事件 | ⚠️ 见 P-6
+供应量统计 | totalSupply 准确反映 | burnLocked 用 _transfer，不减 totalSupply | ⚠️ 见 P-5
+P-1 | [高风险]  economyContract 权限过度授权
+P-2 | [高风险]  addLocked 缺少余额预检查——奖励池耗尽时全局 gather 永久 revert
+P-3 | [中风险]  mintFree 命名严重误导——实为 transfer 而非 mint
+P-4 | [中风险]  lockedBalance 为 public mapping——信息泄露助力针对性掠夺攻击
+P-5 | [中风险]  burnLocked 使用 _transfer 而非 _burn——totalSupply 统计不准确
+P-6 | [低风险]  transferLocked 缺少事件——前端无法监听掠夺结果
+P-7 | [低风险]  缺少 totalLockedSupply 计数器——语义不够清晰
+优先级 | 问题编号 | 问题 | 行动
+P0 | P-1 | economyContract 权限过度授权 | 立即修复——拆分 modifier 权限
+P0 | P-2 | addLocked 缺少余额预检查 | 立即修复——EconomyEngine 加余额检查
+P1 | P-3 | mintFree 命名误导 | 下版本改名为 distributeFromPool
+P1 | P-5 | burnLocked 销毁方式不统一 | 确认设计意图，统一文档说明
+P2 | P-6 | transferLocked 缺少事件 | 添加 LockedTransferred 事件
+P2 | P-7 | 缺少 totalLockedSupply 计数器 | 新增状态变量并同步维护
+函数 | 可调用方 | 操作类型 | 备注
+addLocked(agentId, amount) | game+economy | 写 | 从奖励池锁入 Agent 账本
+spendLocked(agentId, amount) | game+economy | 写 | 扣除锁定余额并 _burn（真销毁）
+burnLocked(agentId) | game+economy | 写 | Agent 死亡，全部发往 0xdead
+transferLocked(from, to, amount) | game+economy | 写 | 锁定余额转移（raid 场景）⚠️ 无事件
+mintFree(to, amount) | game+economy | 写 | 从奖励池 transfer（注意：不是 mint）⚠️ 命名误导
+getLockedBalance(agentId) | 任意 | 读 | 查询 Agent 锁定余额
+getFreeBalance(address) | 任意 | 读 | 查询 ERC-20 自由余额（即 balanceOf）
+lockedBalance(agentId) | 任意 | 读 | public mapping 直接读取（与 getLockedBalance 等价）
+balanceOf(address) | 任意 | 读 | ERC-20 标准接口
+totalSupply() | 任意 | 读 | ⚠️ 含 0xdead 余额，非真实流通量
+transfer/transferFrom/approve | 任意 | 写 | ERC-20 标准接口
+
+========== CodeDNA_Audit_02_GenesisCore.txt ==========
+
+
+CodeDNA 智能合约安全审计报告
+ 
+
+合约 #2 — GenesisCore (CDNA)
+BNB Smart Chain 主网  ERC-721 创世 Agent NFT
+
+
+1. 审计概述
+GenesisCore 是 CodeDNA 系统的核心 NFT 合约，负责铸造和管理所有 Agent 的链上 DNA、能量状态和属性数据。它是整个游戏的数据层根基，所有其他合约（BehaviorEngine、EconomyEngine、DeathEngine、NFTMarket 等）都以它的数据为权威来源。
+
+
+2. 链上实时状态
+
+3. 设计文档一致性核查
+逐一核对合约实现与设计规格：
+
+
+4. 安全风险详情
+本次审计共发现 2个高风险、4个中风险、3个低风险 问题，汇总如下：
+
+
+问题详情
+问题描述
+mintFor 中的 DNA 生成使用了以下随机种子：keccak256(abi.encodePacked(to, block.prevrandao, block.number, block.timestamp, tokenId))。
+在 BNB Smart Chain (PoSA 共识) 中，block.prevrandao 由当前区块的验证者控制。验证者在提议区块时可以选择是否发布区块，从而进行丢块攻击（grinding attack）：连续尝试直到生成期望的 DNA 值。BSC 有21个验证者轮流出块，利用成本较低。block.timestamp 也可被验证者在约15秒范围内操控。
+相关代码
+bytes32 seed = keccak256(
+    abi.encodePacked(
+        to,
+        block.prevrandao,  // 验证者可影响此值
+        block.number,      // 完全可预测
+        block.timestamp,   // 验证者可在约15s内操控
+        tokenId            // 完全可预测
+    )
+);
+影响分析
+攻击者若同时是验证者（或与验证者勾结），可预先计算多个 prevrandao，丢弃不利的区块，保留生成出最高属性 DNA（IQ=255, STR=255）的区块。
+在竞争性游戏环境中，IQ=255/STR=255 的 Agent 在 gather 产出上有显著优势（约为平均Agent的2.5倍），长期收益远超 0.1 BNB 的铸造成本。
+普通用户无法防御这种攻击，会形成验证者特权阶层，破坏游戏公平性。
+修复建议
+理想方案：集成 Chainlink VRF（链上可验证随机数），异步完成 DNA 生成：
+function requestMint(address to) external onlyLPManager {
+    uint256 reqId = COORDINATOR.requestRandomWords(keyHash, subId, 3, 100000, 1);
+    pendingMints[reqId] = to;
+}
+function fulfillRandomWords(uint256 reqId, uint256[] memory randomWords) internal override {
+    _completeMint(pendingMints[reqId], randomWords[0]);
+}
+
+低成本替代方案：提交-揭示机制 (commit-reveal)，买家先提交 commitment，
+下一区块揭示 secret，DNA = keccak256(secret + block.prevrandao @ reveal block)
+
+问题描述
+合约部署后，setGameContract 和 setLPManager 需要通过两笔独立交易完成设置（链上数据显示 lpManager 在部署后 2 个区块才设置）。在 mempool 等待期间，攻击者可以抢先发送更高 gas fee 的交易，将关键地址设置为恶意合约。
+一旦设置成功就永远无法更改。恶意的 gameContract 可以调用所有 onlyGame 函数（setEnergy、markDead、mintOffspring 等），完全控制所有 Agent 的状态。
+相关代码
+// 问题：部署和设置是分离的多步操作，存在攻击窗口
+function setGameContract(address _gameContract) external {
+    if (msg.sender != deployer) revert OnlyOwner();
+    if (gameContract != address(0)) revert OnlyOwner();  // 设置后锁死
+    gameContract = _gameContract;
+}
+// setLPManager 在部署后的独立交易中调用——存在约 6 秒的攻击窗口
+影响分析
+如果部署者钱包被盗，或 mempool 中遭受前置攻击，攻击者可永久控制 gameContract/lpManager 指向恶意地址。
+当前部署已顺利完成，但对于未来重新部署（合约升级、迁移）时此风险依然存在。
+修复建议
+最优方案：在构造函数中一次性初始化所有关键地址，彻底消除攻击窗口：
+constructor(address _gameContract, address _lpManager) ERC721("CodeDNA Agent", "CDNA") {
+    if (_gameContract == address(0)) revert ZeroAddress();
+    if (_lpManager == address(0)) revert ZeroAddress();
+    deployer = msg.sender;
+    gameContract = _gameContract;  // 部署时一次性设置
+    lpManager = _lpManager;        // 部署时一次性设置
+    emit GameContractSet(_gameContract);
+}
+// 删除 setGameContract 和 setLPManager 函数
+
+问题描述
+getGenesisPrice() 通过 for 循环计算阶梯价格，最多循环 9 次（因为 MAX_GENESIS/PRICE_STEP_SIZE = 10）。每次用户购买 NFT 时 NFTSale 都会调用此函数，额外的循环 gas 由买家承担。
+相关代码
+function getGenesisPrice() public view returns (uint256) {
+    uint256 tier = totalGenesisCount / PRICE_STEP_SIZE;  // 0-9
+    uint256 price = GENESIS_BASE_PRICE;
+    for (uint256 i = 0; i < tier; i++) {  // 最多循环9次
+        price = (price * PRICE_MULTIPLIER) / PRICE_DIVISOR;
+    }
+    return price;
+}
+影响分析
+每次购买额外消耗约 2000+ gas（tier=9时），gas 成本由买家承担。
+修复建议
+使用预计算查找表，O(1) 时间复杂度：
+uint256[10] private constant PRICE_TIERS = [
+    0.1 ether, 0.112 ether, 0.12544 ether, 0.1404928 ether,
+    0.157351936 ether, 0.17623416832 ether, 0.1973822845 ether,
+    0.2210841587 ether, 0.2476142577 ether, 0.2773279686 ether
+];
+function getGenesisPrice() public view returns (uint256) {
+    return PRICE_TIERS[totalGenesisCount / PRICE_STEP_SIZE];
+}
+
+问题描述
+getEffectiveAttribute 和 getDNAAttribute 均通过 this.getAttributes(tokenId) 调用基础属性。this. 前缀代表外部调用（external call），需要额外的 EVM CALL opcode，消耗约 700+ gas，而直接内部调用只需 JUMP。
+相关代码
+function getEffectiveAttribute(uint256 tokenId, uint8 attrIdx) external view returns (uint16) {
+    (uint16[8] memory base, ) = this.getAttributes(tokenId);  // external call! 浪费gas
+    return base[attrIdx] + agentAttributeBonus[tokenId][attrIdx];
+}
+影响分析
+每次调用额外消耗约 700-2100 gas。AgentBridge 批量构建 AgentState 时此消耗会累积。
+修复建议
+提取内部函数，避免 this. 调用：
+function _getAttributes(uint256 tokenId) internal view returns (uint16[8] memory attrs, uint8 gender) {
+    // 同原 getAttributes 逻辑...
+}
+function getAttributes(uint256 tokenId) external view returns (uint16[8] memory, uint8) {
+    return _getAttributes(tokenId);  // 外部接口
+}
+function getEffectiveAttribute(uint256 tokenId, uint8 attrIdx) external view returns (uint16) {
+    (uint16[8] memory base, ) = _getAttributes(tokenId);  // 内部调用，省gas
+    return base[attrIdx] + agentAttributeBonus[tokenId][attrIdx];
+}
+
+问题描述
+getAttributes() 中属性计算全部使用整数除法：uint16(g[0]) * 4 / 10。当基因值较低时产生截断：g[0]=1 时计算结果为 0（而非0.4），g[0]=2 时也为 0（而非0.8）。三条 IQ 相关基因都很低时，最终 attrs[0]（IQ）可能为 0。
+相关代码
+attrs[0] = uint16(g[0]) * 4 / 10   // g[0]<=2 时贡献为0（截断）
+         + uint16(g[8]) * 3 / 10   // g[8]<=3 时贡献为0（截断）
+         + uint16(g[5]) * 3 / 10;  // g[5]<=3 时贡献为0（截断）
+// 极端情况：g[0]=2, g[8]=3, g[5]=3 -> attrs[0] = 0 + 0 + 0 = 0
+影响分析
+IQ=0 的 Agent 在 EconomyEngine 中 iqMult=800，gather 产出约为满IQ Agent 的 44.4%，不会崩溃但长期处于不利地位。
+这是一个需要与团队确认的设计决策：是否允许 IQ=0 的 Agent 存在？
+修复建议
+改为先累加再除，精度显著提升：
+// 修改前（各项独立截断）
+attrs[0] = uint16(g[0]) * 4 / 10 + uint16(g[8]) * 3 / 10 + uint16(g[5]) * 3 / 10;
+
+// 修改后（先累加再除，减少截断）
+attrs[0] = (uint16(g[0]) * 4 + uint16(g[8]) * 3 + uint16(g[5]) * 3) / 10;
+
+问题描述
+ERC-721 标准中，tokenURI() 负责返回 NFT 的元数据（名称、图片、属性等）。GenesisCore 没有重写 OpenZeppelin 基类的 tokenURI()，导致返回空字符串。而 DNA 基因、属性、能量等数据全部存储在链上，非常适合生成动态链上元数据。
+相关代码
+// OpenZeppelin 默认实现：返回空字符串
+function tokenURI(uint256 tokenId) public view virtual returns (string memory) {
+    _requireOwned(tokenId);
+    string memory baseURI = _baseURI();
+    return bytes(baseURI).length > 0 ? string.concat(baseURI, id.toString()) : "";
+}
+// GenesisCore 未重写此函数，未设置 _baseURI
+影响分析
+在 NFTMarket（合约#10）上挂单的 Agent，买家无法在界面上看到任何属性信息，极大影响交易意愿。
+OpenSea 等第三方市场无法索引属性，导致无法按 IQ、STR 过滤搜索。
+修复建议
+实现中心化 baseURI 方案（最简单）：
+string private _baseTokenURI = 'https://api.codedna.io/agent/';
+function _baseURI() internal view override returns (string memory) {
+    return _baseTokenURI;
+}
+// 或实现链上动态 SVG（数据已完全在链上，可完全去中心化）
+
+问题描述
+setGameContract 有 GameContractSet 事件，但 setLPManager 没有对应事件。对于一次性的关键配置操作，缺少事件使链上监控无法感知 lpManager 的设置。
+相关代码
+function setGameContract(address _gameContract) external {
+    ...  emit GameContractSet(_gameContract);  // 有事件
+}
+function setLPManager(address _lpManager) external {
+    ...  lpManager = _lpManager;
+    // 没有 emit 任何事件！
+}
+影响分析
+链上无法通过事件日志追踪 lpManager 的设置时间和设置者，增加审计难度。
+修复建议
+增加事件：
+event LPManagerSet(address indexed lpManager);
+function setLPManager(address _lpManager) external {
+    ...  lpManager = _lpManager;
+    emit LPManagerSet(_lpManager);  // 添加此行
+}
+
+问题描述
+markDead() 只将 agentEnergy 设为 0、lastEatBlock 设为 0，不销毁 NFT 也不锁定转移。死亡 Agent 的 ERC-721 Token 仍可在 OpenSea 等外部市场正常挂单成交，不知情的买家可能购买到死亡 Agent。
+相关代码
+function markDead(uint256 tokenId) external onlyGame {
+    agentEnergy[tokenId] = 0;
+    lastEatBlock[tokenId] = 0;
+    // NFT 仍然存在且可以转移！没有任何限制
+}
+影响分析
+在 CodeDNA 自有的 NFTMarket（合约#10）中，buyAgent 有 _isAgentDead 检查，可以防止此问题。
+主要影响外部第三方市场（OpenSea、PancakeSwap NFT等）的用户。
+修复建议
+这是一个已知的设计权衡（死亡Agent作为历史收藏品保留）。建议至少在合约注释中明确说明：
+/**
+ * @notice markDead 只清除游戏状态，不销毁NFT。
+ * 死亡 Agent 的 NFT 仍可转移，可作为历史收藏品保留。
+ * 任何第三方市场集成时需通过 DeathEngine.isDead() 检查状态。
+ */
+
+问题描述
+子代 tokenId 的计算为：childId = 10_000 + (totalTokenCount - totalGenesisCount)。虽然 totalTokenCount 永远 >= totalGenesisCount（两者在 mintFor 中同时递增），实际不会下溢，但代码语义不直观，不如独立计数器清晰。
+相关代码
+function mintOffspring(...) external onlyGame returns (uint256 childId) {
+    childId = 10_000 + (totalTokenCount - totalGenesisCount);
+    // totalTokenCount - totalGenesisCount = 已有子代数量
+    totalTokenCount++;
+    // totalGenesisCount 不递增（只有创世才增）
+}
+影响分析
+这是语义清晰度问题，实际不会造成功能错误，但代码可读性较差。
+修复建议
+使用独立的 offspringCount 计数器，语义更清晰：
+uint256 public offspringCount;  // 独立子代计数器
+function mintOffspring(...) external onlyGame returns (uint256 childId) {
+    childId = 10_000 + offspringCount;
+    offspringCount++;
+    totalTokenCount++;
+    ...
+}
+
+5. 总结与修复优先级
+5.1 整体评估
+GenesisCore 作为 ERC-721 NFT 合约，核心铸造逻辑、属性计算、能量管理设计合理，与设计文档基本一致。ERC-721 标准实现使用了成熟的 OpenZeppelin 库，无标准层面的安全问题。主要风险集中在 DNA 随机数质量和部署期的操作安全上。
+
+5.2 修复优先级
+
+5.3 与其他合约关联风险
+P-1（DNA随机性） 影响全局游戏平衡——被操控的超高属性 Agent 在 EconomyEngine 的 gather 产出中有绝对优势，破坏公平性。
+P-5（属性精度） 影响 EconomyEngine.calcGatherYield——IQ=0 的 Agent 产出仅为满 IQ Agent 的 44.4%。
+P-6（无 tokenURI） 影响 NFTMarket（合约#10）——买家无法在市场界面看到 Agent 属性，降低交易活跃度。
+
+附录：GenesisCore 关键函数速查
+
+— 审计报告结束 —
+合约地址 | 0x4033AFaFAb90191a4982CdAfa5Cb4E117A91f185
+合约名称 | GenesisCore.sol
+代币标准 | ERC-721 (CodeDNA Agent / CDNA)
+编译器版本 | v0.8.24+commit.e11b9ed9
+部署时间 | 2026-03-04
+部署者 | 0xa172aBd7...2159ebB07
+审计日期 | 2026-03-05
+审计轮次 | 第2轮 (共9合约逐一审计)
+审计范围 | 详情
+合约文件 | GenesisCore.sol（主合约）+ OpenZeppelin ERC721 标准库（File 2-16，原版）
+核心职责 | ERC-721 NFT铸造 · 链上DNA生成 · 能量/属性状态管理 · 阶梯定价 · 子代铸造
+审计深度 | 全量源码审计，涵盖DNA生成随机性、权限控制、Gas效率、数值精度、跨合约依赖
+调用者 | mintFor: 仅 NFTSale (lpManager)   |   onlyGame: 仅 BehaviorEngine (gameContract)
+指标 | 当前数据
+直接交易数 | 3笔（部署 + setGameContract + setLPManager）
+已铸造创世 Agent | 5枚（tokenId 0-4，经由 NFTSale 完成5笔 mintGenesis）
+子代 Agent | 暂无（reproduce 尚未触发）
+gameContract 设置 | 0xa172aBd7...2159ebB07，与部署在同一区块 block 84627985
+lpManager 设置 | 0xa172aBd7...2159ebB07，block 84627987（晚2个区块）
+合约持有BNB | 0 BNB（全部资金由 NFTSale 管理）
+检查项 | 设计文档要求 | 合约实现 | 状态
+最大供应量 | 10,000 创世 Agent | MAX_GENESIS = 10_000 | ✅
+DNA基因数量 | 23条基因 (uint8) | uint8[23] agentGenes | ✅
+阶梯价格机制 | 每1000个x112%，起价0.1BNB | PRICE_STEP=1000, MUL=112 | ✅
+初始能量 | 创世 Agent = 80 点 | ENERGY_INIT_GENESIS = 80 | ✅
+子代能量 | 子代 = 50 点 | agentEnergy[childId] = 50 | ✅
+tokenId分配 | 创世0-9999，子代从10000起 | genesis=totalGenesisCount, offspring=10000+offset | ✅
+lastEatBlock初始化 | 铸造时设为当前区块 | lastEatBlock[tokenId] = block.number | ✅
+属性加成上限 | teach加成上限20点 | if current+bonus > 20 revert | ✅
+GameContract设置 | 仅可设一次 | if(gameContract!=address(0)) revert | ✅
+LPManager设置 | 仅可设一次 | if(lpManager!=address(0)) revert | ✅
+BNB流向 | 全部由NFTSale管理 | 仅lpManager可调mintFor，不持BNB | ✅
+DNA随机性 | 链上确定性随机 | keccak256(prevrandao+blocknum+ts+to+tokenId) | ⚠️ P-1
+tokenURI实现 | NFT元数据显示 | 未实现 tokenURI() | ⚠️ P-6
+setLPManager事件 | 需有事件记录 | 无 LPManagerSet 事件 | ⚠️ P-7
+编号 | 风险等级 | 问题描述 | 影响资金 | 紧急程度
+P-1 | 高风险 | DNA随机数可被验证者操控——block.prevrandao非安全随机源 | 是(间接) | 立即关注
+P-2 | 高风险 | setGameContract/setLPManager无时间锁——部署期存在前置攻击窗口 | 是 | 立即修复
+P-3 | 中风险 | getGenesisPrice()使用循环累乘——不必要的gas消耗 | 否 | 建议优化
+P-4 | 中风险 | getEffectiveAttribute使用this.外部调用——浪费gas | 否 | 建议修复
+P-5 | 中风险 | 属性计算整数除法截断——低基因值Agent属性归零 | 否 | 设计确认
+P-6 | 中风险 | 合约无tokenURI()实现——NFT在所有市场显示为空白 | 否 | 建议修复
+P-7 | 低风险 | setLPManager缺少事件——链上无法追踪LP管理器变更 | 否 | 建议修复
+P-8 | 低风险 | markDead不阻止NFT转移——外部市场可能成交死亡Agent | 否 | 设计确认
+P-9 | 低风险 | 子代tokenId计算依赖减法——极端情况存在ID混淆风险 | 否 | 建议关注
+P-1 | [高风险]  DNA随机数可被验证者操控——block.prevrandao 非安全随机源
+P-2 | [高风险]  setGameContract/setLPManager 无时间锁——部署期存在前置攻击窗口
+P-3 | [中风险]  getGenesisPrice() 使用 for 循环累乘——可用查找表替代
+P-4 | [中风险]  getEffectiveAttribute/getDNAAttribute 使用 this.xxx() 外部调用——gas浪费
+P-5 | [中风险]  属性计算整数除法截断——低基因值Agent属性归零影响游戏平衡
+P-6 | [中风险]  合约未实现 tokenURI()——NFT在所有市场显示为空白
+P-7 | [低风险]  setLPManager 缺少 LPManagerSet 事件
+P-8 | [低风险]  markDead 不阻止NFT转移——外部市场可能成交死亡Agent
+P-9 | [低风险]  子代tokenId计算依赖减法——语义不清晰
+优先级 | 编号 | 问题 | 行动
+P0 | P-1 | DNA随机数可被验证者操控 | 评估 Chainlink VRF 集成；或提交-揭示机制
+P0 | P-2 | 地址设置无时间锁 | 下次部署改为构造函数一次性初始化
+P1 | P-6 | 未实现 tokenURI() | 实现链上动态元数据或接入中心化API
+P1 | P-4 | 外部 this.getAttributes() 调用浪费gas | 提取 _getAttributes 内部函数
+P2 | P-3 | getGenesisPrice() 循环累乘 | 改用价格查找表
+P2 | P-5 | 属性计算整数截断 | 确认设计意图；如需修复改为累加后除
+P2 | P-7 | 缺少 LPManagerSet 事件 | 增加事件 emit
+函数 | 可调用方 | 类型 | 备注
+mintFor(to, price) | lpManager | 写 | 铸造创世Agent，DNA链上生成，能量初始化80
+mintOffspring(to, fatherId, motherId) | gameContract | 写 | 铸造子代，DNA继承+突变，能量初始化50
+setGameContract(addr) | deployer | 写 | 仅可设一次；见P-2
+setLPManager(addr) | deployer | 写 | 仅可设一次；无事件见P-7
+setEnergy(tokenId, energy) | gameContract | 写 | 更新能量值
+setLastEatBlock(tokenId, block) | gameContract | 写 | 更新最后进食区块
+incrementReproduceCount(tokenId) | gameContract | 写 | 繁殖计数+1
+addAttributeBonus(tokenId, idx, bonus) | gameContract | 写 | teach加成，上限20点
+markDead(tokenId) | gameContract | 写 | 清零能量；NFT不销毁，见P-8
+getGenesisPrice() | 任意 | 读 | 当前阶梯价格；循环计算见P-3
+getAttributes(tokenId) | 任意 | 读 | 返回8个属性值和性别
+getGenes(tokenId) | 任意 | 读 | 返回23条原始基因
+getEffectiveAttribute(tokenId, idx) | 任意 | 读 | 基础属性+teach加成；外部调用见P-4
+getDNAAttribute(tokenId, idx) | 任意 | 读 | 仅基础属性，不含teach加成
+getGender(tokenId) | 任意 | 读 | 0=男，1=女
+
+========== CodeDNA_Audit_03_WorldMap.txt ==========
+
+
+CodeDNA 智能合约安全审计报告
+ 
+
+合约 #3 — WorldMap (世界地图)
+BNB Smart Chain 主网  1,000,000 格稀疏地图 · 探索奖励系统
+
+
+1. 审计概述
+WorldMap 是 CodeDNA 系统的世界地图合约，管理 1,000,000 个格子（1000×1000）的 Agent 位置状态。它是 BehaviorEngine 的地理层依赖，为移动、探索奖励触发、地块类型查询提供基础服务。地块类型由 keccak256(plotId) 永久决定，不存储在链上，节省大量存储 gas。
+
+
+2. 链上实时状态
+
+3. 设计文档一致性核查
+逐一核对合约实现与设计规格：
+
+
+4. 安全风险详情
+本次审计共发现 1个高风险、2个中风险、3个低风险 问题，汇总如下：
+
+
+问题详情
+问题描述
+constructor 仅执行 `gameContract = _gameContract`，未检查 `_gameContract != address(0)`。由于 gameContract 是 immutable 变量，一旦部署时传入错误地址（包括 address(0)），合约所有写入函数将永久不可用，且无任何升级或修复机制。
+对比同系列的 FamilyTracker、EconomyEngine 等合约，均有 `if (_xxx == address(0)) revert ZeroAddress()` 的防护。WorldMap 的缺失属于一致性问题。
+相关代码
+constructor(address _gameContract) {
+    // 缺少: if (_gameContract == address(0)) revert ZeroAddress();
+    gameContract = _gameContract;  // 永久写入，无法修改
+}
+
+// 所有写入函数依赖此校验
+modifier onlyGame() {
+    if (msg.sender != gameContract) revert OnlyGame();
+    _;
+}
+影响分析
+若部署脚本传入零地址或错误地址，所有 placeAgent / moveAgent / removeAgent 调用均 revert OnlyGame()，地图功能完全瘫痪。
+当前部署已正确传入 BehaviorEngine 地址（验证通过），但对未来重新部署（合约升级、迁移）的风险敞口依然存在。
+与 GenesisCore 的 P-2 类似，本问题同样属于部署安全问题，需在下次部署时修复。
+修复建议
+在 constructor 中加入零地址校验：
+constructor(address _gameContract) {
+    if (_gameContract == address(0)) revert ZeroAddress();
+    gameContract = _gameContract;
+}
+
+问题描述
+_checkExploreReward() 在标记 plotEverExplored[plotId]=true 后，仅 emit PlotExplored(agentId, plotId) 事件，不执行任何链上资产转移。EXPLORE_BONUS = 200，注释明确标注「不含精度，由调用方乘 1e18」。
+在 Solidity 合约调用链中，合约无法读取同笔交易中其他合约 emit 的事件。BehaviorEngine 在调用 WorldMap.moveAgent() 后，无法通过 Solidity 代码感知是否触发了 PlotExplored。奖励发放只能依赖：① BehaviorEngine 自行检查 plotEverExplored 前后变化，或 ② 链下服务监听事件后调用奖励函数。
+相关代码
+// WorldMap._checkExploreReward: 仅标记 + emit
+plotEverExplored[plotId] = true;
+exploreCountInWindow[agentId]++;
+emit PlotExplored(agentId, plotId);  // 链上无资产流动
+
+// EXPLORE_BONUS = 200  (不含精度，调用方需乘1e18)
+// BehaviorEngine 在同笔 tx 中无法读取此事件
+影响分析
+若 BehaviorEngine 通过检查 plotEverExplored 变化来发放奖励（比较调用前后状态），逻辑是可行的，但需要额外的读存储开销。
+若依赖链下服务监听事件，存在服务宕机、延迟、漏处理的风险，用户探索新地块可能得不到 200 DNAGOLD 奖励。
+EXPLORE_BONUS 精度问题：若调用方忘记乘以 1e18，用户将只获得 200 wei（约 2×10⁻¹⁶ DNAGOLD）而非 200 整枚，且链上无验证机制。
+修复建议
+方案一（推荐）：在 _checkExploreReward 中返回布尔值，让 BehaviorEngine 在同笔 tx 内决策：
+function _checkExploreReward(uint256 agentId, uint256 plotId) internal returns (bool explored) {
+    if (plotEverExplored[plotId]) return false;
+    ...  // 窗口检查
+    plotEverExplored[plotId] = true;
+    exploreCountInWindow[agentId]++;
+    emit PlotExplored(agentId, plotId);
+    return true;  // BehaviorEngine 据此发放奖励
+}
+
+方案二：在 WorldMap 中直接调用 DNAGold.mintFree()，彻底链上化（需 WorldMap 持有 mintFree 权限）
+方案三：EXPLORE_BONUS 改为含精度常量：EXPLORE_BONUS = 200 * 1e18
+
+问题描述
+系统中 Agent 的地块位置信息被分散存储在两个合约中：WorldMap 维护 plotAgentCount（人数统计），EconomyEngine 维护 _plotAgents（完整 Agent ID 列表）。两者均需 BehaviorEngine 在每次 placeAgent/moveAgent/removeAgent 时同步更新，但两套更新调用没有原子性保证。
+具体使用场景分工：calcGatherYield() 使用 BehaviorEngine 传入的 plotCount 参数（基于 WorldMap.plotAgentCount），getPlotLeader() 遍历 EconomyEngine._plotAgents。若两者不一致，可能导致产出计算的竞争惩罚与领袖判断依据不同步。
+相关代码
+// WorldMap 维护：人数计数
+plotAgentCount[newPlot]++;  // moveAgent 时更新
+
+// EconomyEngine 维护：完整列表
+_plotAgents[toPlot].push(agentId);  // moveAgentPlot 时更新
+
+// BehaviorEngine 需要同时调用两者，无原子性保证
+worldMap.moveAgent(agentId, newX, newY);          // 更新WorldMap
+economy.moveAgentPlot(agentId, fromPlot, toPlot); // 更新EconomyEngine
+影响分析
+若 BehaviorEngine 中 moveAgent 调用成功但 moveAgentPlot 因 gas 耗尽或 revert 失败，两套数据将不一致，影响后续 gather 产出的竞争因子计算。
+目前 BehaviorEngine 有 448+ 次活跃交易（Gather/Reproduce 等），说明已有用户在使用，若存在不同步场景会直接影响玩家利益。
+修复建议
+架构层面建议将地块 Agent 列表统一归一处管理（或由 WorldMap 持有完整列表，EconomyEngine 通过 view 函数读取）。
+短期：在 BehaviorEngine 中确保两个调用在同一函数内按顺序执行，任意一步失败则整体 revert（Solidity 的 atomic tx 特性已天然保证，确认 BehaviorEngine 无 try-catch 分离两个调用即可）。
+
+问题描述
+removeAgent() 在 Agent 未上图时静默返回：`if (!agentOnMap[agentId]) return;`，而 placeAgent() 和 moveAgent() 在 Agent 未上图时 revert NotOnMap/AlreadyOnMap，行为不一致。
+相关代码
+function removeAgent(uint256 agentId) external onlyGame {
+    if (!agentOnMap[agentId]) return;  // 静默返回，无任何错误信号
+    ...
+}
+
+// 对比：moveAgent 在未上图时 revert
+function moveAgent(uint256 agentId, ...) external onlyGame {
+    if (!agentOnMap[agentId]) revert NotOnMap(agentId);  // 一致的错误处理
+}
+影响分析
+若 BehaviorEngine 的 Agent 死亡处理流程中错误地对未上图的 Agent 调用 removeAgent，不会得到任何错误信号，可能导致死亡状态与地图状态的不一致。
+修复建议
+根据设计意图选择处理方式：
+// 方案1（幂等设计，当前行为，适合 Agent 可能已离图的场景）：保持现状但加注释
+if (!agentOnMap[agentId]) return; // intentionally idempotent
+
+// 方案2（严格模式，与其他函数一致）：
+if (!agentOnMap[agentId]) revert NotOnMap(agentId);
+
+问题描述
+toPlotId(x, y) 是 pure 函数，直接返回 x * MAP_SIZE + y，不验证 x < MAP_SIZE 且 y < MAP_SIZE。当 x=1000, y=0 时返回 plotId=1,000,000，超出有效范围（0-999,999），但计算结果不会触发任何错误。
+相关代码
+function toPlotId(uint256 x, uint256 y) public pure returns (uint256) {
+    return x * MAP_SIZE + y;  // 无边界检查
+    // x=1000, y=0 → plotId=1,000,000 (越界但不报错)
+}
+影响分析
+前端或合约若将此函数用于生成 plotId 后直接传入 placeAgent/moveAgent，会因 OutOfBounds 而 revert，但调试信息不直观。若用于计算地块属性（getPlotType/getPlotMultiplier），越界 plotId 会得到一个「幽灵地块」的属性值，无实际游戏格子对应。
+修复建议
+在 toPlotId 中加入边界校验：
+function toPlotId(uint256 x, uint256 y) public pure returns (uint256) {
+    if (x >= MAP_SIZE || y >= MAP_SIZE) revert OutOfBounds(x, y);
+    return x * MAP_SIZE + y;
+}
+
+问题描述
+在 _checkExploreReward 中，窗口重置检查先于上限检查执行。当 exploreCountInWindow 已达10次且窗口到期时，下一次调用会重置窗口并将 exploreCountInWindow 清零，然后再检查是否未达上限——这是预期行为。但逻辑顺序意味着「已达上限但窗口未到期」时，每次调用都会重新运行一次 block.number 比较，略微浪费 gas。
+相关代码
+function _checkExploreReward(uint256 agentId, uint256 plotId) internal {
+    if (plotEverExplored[plotId]) return;
+    // 先检查窗口是否过期（每次都执行，包括已达上限的情况）
+    if (block.number >= exploreWindowStart[agentId] + EXPLORE_WINDOW) {
+        exploreWindowStart[agentId] = block.number;
+        exploreCountInWindow[agentId] = 0;
+    }
+    // 再检查上限
+    if (exploreCountInWindow[agentId] >= EXPLORE_WINDOW_LIMIT) return;
+    ...
+影响分析
+对于已达上限的 Agent，每次移动都需多执行一次 SLOAD（读 exploreWindowStart）和一次比较，约 2100 gas，在高频移动场景下会有轻微累积。
+修复建议
+调换上限检查与窗口检查顺序，在未到期且已达上限时提前返回：
+function _checkExploreReward(uint256 agentId, uint256 plotId) internal {
+    if (plotEverExplored[plotId]) return;
+    // 先检查是否需要重置窗口
+    if (block.number >= exploreWindowStart[agentId] + EXPLORE_WINDOW) {
+        exploreWindowStart[agentId] = block.number;
+        exploreCountInWindow[agentId] = 0;
+    }
+    if (exploreCountInWindow[agentId] >= EXPLORE_WINDOW_LIMIT) return;  // 上限检查放后
+    // (逻辑等价，但调换后在「已达上限且未到期」时节省gas)
+
+5. 总结与修复优先级
+5.1 整体评估
+WorldMap 设计简洁，代码清晰。1,000,000 格稀疏存储（只存有人的格子）节省了大量 gas，地块类型由 keccak256 永久决定而不存储的设计也很高效。曼哈顿距离验证、越界防护、重复上图防护均到位。主要风险集中在探索奖励的链上实现缺口和双重状态维护的一致性问题。
+
+5.2 修复优先级
+
+5.3 与其他合约关联风险
+P-2（探索奖励缺口） 直接影响 BehaviorEngine / DNAGold：若奖励未正确链上化，用户移动到新地块得不到 200 DNAGOLD 奖励。
+P-3（双重状态） 影响 EconomyEngine：getPlotLeader() 和 calcGatherYield() 可能基于不一致的数据，导致领袖加成和竞争惩罚计算有偏差。
+
+附录：WorldMap 关键函数速查
+
+— 审计报告结束 —
+合约地址 | 0x9C3eD84D6BFDDD425b46a94052f725B23593c297
+合约名称 | WorldMap.sol
+合约类型 | 世界地图 — 1000×1000 格坐标、移动、探索奖励
+编译器版本 | v0.8.24+commit.e11b9ed9
+部署时间 | 2026-03-04
+部署者 | 0xa172aBd7...2159ebB07
+审计日期 | 2026-03-05
+审计轮次 | 第3轮 (共9合约逐一审计)
+审计范围 | 详情
+合约文件 | WorldMap.sol（1文件，无外部依赖）
+核心职责 | Agent 上图/移动/下图 · 曼哈顿距离验证 · 探索奖励事件触发 · 地块类型/倍率查询
+审计深度 | 全量源码审计，涵盖状态一致性、探索奖励架构、权限控制、Gas 效率
+调用者 | onlyGame: 仅 BehaviorEngine (gameContract)  |  pure 查询: 任意合约
+指标 | 当前数据
+直接交易数 | 1笔（部署交易，constructor 同时写入 gameContract）
+gameContract | BehaviorEngine（0x293fbFC8...C23EA4D77），构造时注入，不可更改
+地图上 Agent 数 | 数据通过内部状态维护，链上已存在活跃 Gather/Move 调用
+已探索格子数 | 通过 plotEverExplored mapping 记录，无总计数器（需链下统计）
+合约持 BNB | 0 BNB（WorldMap 不持有任何资产）
+部署优势 | 相较 GenesisCore，gameContract 在 constructor 中一次性设置，无前置攻击窗口
+检查项 | 设计文档要求 | 合约实现 | 状态
+地图尺寸 | 1000×1000 格 | MAP_SIZE = 1_000 | ✅
+plotId 编码 | plotId = x * 1000 + y | x * MAP_SIZE + y | ✅
+地块类型 | 4种：草原/森林/山地/矿脉 | keccak256(plotId) % 10 → 4类 | ✅
+地块类型比例 | 5:2:2:1（草:林:山:矿） | mod<5/7/9/其余 | ✅
+倍率设计 | 草1.0/林1.5/山0.6/矿3.0 | 1000/1500/600/3000 | ✅
+曼哈顿移动 | 每次仅移1格 | getManhattanDistance==1 验证 | ✅
+探索奖励 | 全服首次 200 DNAGOLD | plotEverExplored + PlotExplored事件 | ⚠️ P-2
+窗口限额 | 每Agent每窗口最多10次 | EXPLORE_WINDOW_LIMIT = 10 | ✅
+探索窗口 | 约1天（28800块） | EXPLORE_WINDOW = 28_800 | ✅
+gameContract 设置 | 构造时传入，不可更改 | immutable gameContract | ⚠️ P-1 无零地址校验
+越界防护 | 坐标必须 < 1000 | x >= MAP_SIZE revert OutOfBounds | ✅
+重复放置防护 | Agent 不可重复上图 | agentOnMap 检查 | ✅
+编号 | 风险等级 | 问题描述 | 影响资金 | 紧急程度
+P-1 | 高风险 | constructor 无零地址校验——gameContract 永久不可变且无防护 | 否 | 立即关注
+P-2 | 中风险 | 探索奖励纯靠事件通知——链上无回调，存在漏奖风险 | 是(间接) | 建议修复
+P-3 | 中风险 | plotAgentCount 与 EconomyEngine _plotAgents 双重维护，存在不同步风险 | 否 | 建议关注
+P-4 | 低风险 | removeAgent 静默返回——可能掩盖调用错误 | 否 | 建议关注
+P-5 | 低风险 | toPlotId() 纯函数无边界检查——可返回越界 plotId | 否 | 建议修复
+P-6 | 低风险 | 探索窗口重置边界条件——已达上限时仍进入窗口判断 | 否 | 建议优化
+P-1 | [高风险]  constructor 无零地址校验——gameContract 永久不可变且无防护
+P-2 | [中风险]  探索奖励纯靠事件通知——链上无回调，EXPLORE_BONUS 精度依赖调用方
+P-3 | [中风险]  plotAgentCount (WorldMap) 与 _plotAgents (EconomyEngine) 双重维护，存在不同步风险
+P-4 | [低风险]  removeAgent 静默返回——可能掩盖调用错误
+P-5 | [低风险]  toPlotId() 纯函数无边界检查——可返回越界 plotId
+P-6 | [低风险]  探索窗口重置逻辑——达上限后窗口到期前仍触发完整重置
+优先级 | 编号 | 问题 | 行动
+P0 | P-1 | constructor 无零地址校验 | 下次部署加 if(_gameContract==address(0)) revert
+P1 | P-2 | 探索奖励无链上回调 | _checkExploreReward 返回 bool；或审查 BehaviorEngine 的奖励发放逻辑
+P1 | P-3 | 双重状态维护不同步风险 | 审查 BehaviorEngine 的 move/remove 调用序列，确保两者同步
+P2 | P-5 | toPlotId 无边界检查 | 加入 OutOfBounds revert
+P2 | P-4/6 | 静默返回 / 窗口逻辑顺序 | 明确注释设计意图；窗口检查顺序优化
+函数 | 可调用方 | 类型 | 备注
+placeAgent(agentId, x, y) | gameContract | 写 | Agent 首次上图，触发探索奖励检查
+moveAgent(agentId, newX, newY) | gameContract | 写 | 移动1格（曼哈顿距离=1），触发探索奖励检查
+removeAgent(agentId) | gameContract | 写 | Agent 下图，静默返回若不在图上，见P-4
+_checkExploreReward(agentId, plotId) | internal | 写 | 首次探索标记 + emit PlotExplored，见P-2
+getManhattanDistance(plotIdA, plotIdB) | 任意 | pure | 返回|x1-x2|+|y1-y2|，移动验证用
+getPlotMultiplier(plotId) | 任意 | pure | 返回地块产出倍率（千分比）：草1000/林1500/山600/矿3000
+getPlotType(plotId) | 任意 | pure | 返回地块类型枚举：0草原/1森林/2山地/3矿脉
+toCoords(plotId) | 任意 | pure | plotId 转 (x,y) 坐标
+toPlotId(x, y) | 任意 | pure | (x,y) 转 plotId，无边界检查，见P-5
+
+========== CodeDNA_Audit_04_FamilyTracker.txt ==========
+
+
+CodeDNA 智能合约安全审计报告
+ 
+
+合约 #4 — FamilyTracker (血缘追踪)
+BNB Smart Chain 主网  父系家族根节点 · 人口统计 · 固定2层亲属检查
+
+
+1. 审计概述
+FamilyTracker 是 CodeDNA 系统的血缘追踪合约，负责维护每个 Agent 的家族根节点（familyRoot）、家族人口统计（familyHeadcount）以及直接亲属关系判断（isDirectRelative）。其设计目标是在 gas 恒定的前提下支持最多2层亲属关系的固定查询，避免昂贵的递归遍历。
+
+
+2. 链上实时状态
+
+3. 设计文档一致性核查
+逐一核对合约实现与设计规格：
+
+
+4. 安全风险详情
+本次审计共发现 1个高风险、2个中风险、2个低风险 问题，汇总如下：
+
+
+问题详情
+问题描述
+registerBirth() 中，子代的 familyRoot 只继承父方的 familyRoot，母方的 familyRoot 被完全忽略。这意味着在 CodeDNA 的文明演化中，家族系谱完全是父系制的——母方家族的 headcount 不会因子代出生而增加，母系血统在链上不可追溯。
+一个来自母方强大家族（familyRoot #0001，人口 1000）的 Agent 与来自小家族父方（familyRoot #9999，人口 3）的 Agent 繁殖，子代会被记入 #9999 家族，#0001 家族 headcount 不变。母方家族实质上在出生注册时被「抹除」。
+这是否为设计意图，需要项目方确认。若游戏设定需要父系制，则逻辑正确；若期望双亲血脉均可追踪（如 headcount 双向记入），则需架构改动。
+相关代码
+function registerBirth(uint256 childId, uint256 fatherId, uint256 motherId) external onlyGame {
+    ...
+    // 只继承父方 familyRoot
+    uint256 rootId = familyRoot[fatherId];
+    familyRoot[childId] = rootId;
+
+    bytes32 key = keccak256(abi.encodePacked(rootId));
+    familyHeadcount[key]++;  // 只给父方家族记人口
+
+    // 母方家族 headcount 不增加，motherId 的 familyRoot 被忽略
+    emit BirthRegistered(childId, fatherId, motherId, rootId);
+}
+影响分析
+母方家族在长期演化中 headcount 增长缓慢（只有自己繁殖出的直系后代才计入），导致父系家族在人口竞争中天然占优。若游戏设计中家族人口数影响某些特权或奖励，母系家族将系统性处于劣势。
+isDirectRelative() 的6种检查已包含「同父」和「同母」两种兄弟关系，说明设计上认可双亲都有意义；但 familyRoot 只继承父方，两者在设计层面存在不一致。
+此问题属于游戏设计层面的高风险问题，不涉及直接资金损失，但会对游戏公平性和玩家体验产生重大影响。
+修复建议
+方案一（确认父系制设计）：如果父系制是设计意图，请在注释和文档中明确标注，并告知玩家母方家族不受影响。无需代码修改。
+方案二（双亲家族均记入）：为子代同时更新双方家族 headcount：
+uint256 fatherRoot = familyRoot[fatherId];
+uint256 motherRoot = familyRoot[motherId];
+familyRoot[childId] = fatherRoot;  // 主归属仍为父方
+familyHeadcount[keccak256(abi.encodePacked(fatherRoot))]++;
+if (motherRoot != fatherRoot) {    // 避免同族重复记入
+    familyHeadcount[keccak256(abi.encodePacked(motherRoot))]++;
+}
+注意：方案二会使 headcount 与实际家族成员数语义不同（一个 Agent 可贡献到两个家族），需同步更新 removeAgent 逻辑。
+
+问题描述
+familyHeadcount 的 mapping key 是 `keccak256(abi.encodePacked(rootId))`（bytes32 类型），而非直接使用 uint256 的 rootId。合约对外暴露的公共 getter `familyHeadcount(bytes32)` 接受 bytes32 参数，但 getFamilyHeadcount(uint256 rootId) 封装函数已正确处理了 keccak256 转换。
+问题在于：合约 ABI 中 `familyHeadcount` 的参数类型是 bytes32（自动生成的 Solidity public mapping getter），前端若直接调用 `familyHeadcount(rootId)` 并传入 uint256，将读取到错误的 key，返回 0。只有通过 getFamilyHeadcount(rootId) 封装函数才能得到正确值。
+相关代码
+// mapping 定义
+mapping(bytes32 => uint256) public familyHeadcount;
+
+// 正确查询方式（封装函数，自动处理keccak256）
+function getFamilyHeadcount(uint256 rootId) external view returns (uint256) {
+    return familyHeadcount[keccak256(abi.encodePacked(rootId))];
+}
+
+// ❌ 错误查询方式（直接调用public getter）
+// familyHeadcount(rootId) 传入uint256会被截断为bytes32，key不匹配，返回0
+
+// 前端正确用法（必须自行计算key）
+// const key = keccak256(encodePacked(['uint256'], [BigInt(rootId)]))
+// const headcount = await contract.familyHeadcount(key)  // 传bytes32
+影响分析
+若前端或其他合约通过自动生成的 familyHeadcount(bytes32) getter 查询时传入 uint256 格式的 rootId，将得到 0，误认为家族已灭绝或不存在，影响前端 UI 展示和游戏决策。
+对于通过 getFamilyHeadcount(rootId) 调用的路径（Solidity 内部调用或前端调用封装函数），不受影响。
+修复建议
+方案一：将 mapping 改为直接使用 uint256 key，消除 keccak256 转换：
+mapping(uint256 => uint256) public familyHeadcount;
+// 内部使用: familyHeadcount[rootId]++
+// getFamilyHeadcount 直接 return familyHeadcount[rootId]
+
+方案二（当前架构不改）：在技术文档中明确说明必须使用 getFamilyHeadcount() 封装函数查询，禁止直接调用 familyHeadcount(bytes32) getter，并在合约注释中加警告：
+/// @notice 必须通过 getFamilyHeadcount(uint256) 查询，勿直接调用 mapping getter
+
+问题描述
+removeAgent() 执行后，只减少 familyHeadcount，但不将 registered[tokenId] 置为 false。因此，同一 tokenId 在 removeAgent 后，仍可通过 registerGenesis 或 registerBirth 再次注册（AlreadyRegistered 检查会放行，因为 registered 仍为 true）。
+反之，若 registered 不被清除，则在调用 registerGenesis 或 registerBirth 时会触发 AlreadyRegistered revert，阻止重新注册。实际上两种情形都有问题：若允许重复注册，headcount 会被重复计入；若不允许，死亡 Agent 对应的 tokenId 在 GenesisCore 被回收/重铸后无法正常注册。
+对于 GenesisCore 的 NFT 实现（tokenId 单调递增，已铸的 ID 永不重用），此问题的实际风险较低。但若系统后期引入 tokenId 复用机制，此问题将变为高危。
+相关代码
+function removeAgent(uint256 tokenId) external onlyGame {
+    if (!registered[tokenId]) revert NotRegistered(tokenId);
+
+    bytes32 key = keccak256(abi.encodePacked(familyRoot[tokenId]));
+    if (familyHeadcount[key] > 0) {
+        familyHeadcount[key]--;
+    }
+
+    // ❌ 缺少: registered[tokenId] = false;
+    // ❌ 缺少: delete familyRoot[tokenId];
+    // ❌ 缺少: delete parents[tokenId];
+    emit AgentRemoved(tokenId, key);
+}
+影响分析
+当前 GenesisCore 使用单调递增 tokenId（无复用），死亡 Agent 的 registered 状态残留不会导致实际问题，因为 tokenId 不会被重新铸造。
+若未来引入「墓地回收」或 tokenId 复用机制，已死亡 tokenId 的残留 registered=true 状态会阻止新 Agent 的注册。
+此外，不清除状态会导致链上查询结果语义不清——registered[deadTokenId] == true，但 Agent 已不存在。
+修复建议
+在 removeAgent 中完整清理 tokenId 的所有状态：
+function removeAgent(uint256 tokenId) external onlyGame {
+    if (!registered[tokenId]) revert NotRegistered(tokenId);
+
+    bytes32 key = keccak256(abi.encodePacked(familyRoot[tokenId]));
+    if (familyHeadcount[key] > 0) {
+        familyHeadcount[key]--;
+    }
+
+    // 清理状态（退还 gas refund）
+    registered[tokenId] = false;
+    delete familyRoot[tokenId];
+    delete parents[tokenId];
+
+    emit AgentRemoved(tokenId, key);
+}
+
+问题描述
+isDirectRelative() 固定检查6种直系关系（父子、母子、同父兄弟、同母兄弟），设计上明确是「2层固定检查，gas 恒定，不递归」。超过2层的血缘关系（如祖孙、堂兄弟、表亲）无法通过此函数识别。
+这是已知设计取舍，不是安全漏洞。记录于此是为了提醒：若游戏规则中某些行为（如交配近亲检测）期望覆盖更远的血缘关系，需要额外实现。
+相关代码
+// 当前只检查 2 层：直接父子/母子/同父/同母
+function isDirectRelative(uint256 a, uint256 b) public view returns (bool) {
+    Parents storage pa = parents[a];
+    Parents storage pb = parents[b];
+    if (pa.fatherId != NO_PARENT && pa.fatherId == b) return true;   // a的父=b
+    if (pa.motherId != NO_PARENT && pa.motherId == b) return true;   // a的母=b
+    if (pb.fatherId != NO_PARENT && pb.fatherId == a) return true;   // b的父=a
+    if (pb.motherId != NO_PARENT && pb.motherId == a) return true;   // b的母=a
+    if (pa.fatherId != NO_PARENT && pa.fatherId == pb.fatherId) return true; // 同父
+    if (pa.motherId != NO_PARENT && pa.motherId == pb.motherId) return true; // 同母
+    return false;
+    // ❌ 无法检查：a的祖父=b、a与b是堂兄弟、a与b同familyRoot
+}
+影响分析
+如果游戏的繁殖规则要求「两个 familyRoot 相同的 Agent 不能繁殖」（近亲回避），当前实现无法通过 isDirectRelative 实现，需额外检查 familyRoot[a] == familyRoot[b]。
+对于已存在的近亲关系未被检测到的场景，游戏逻辑完整性可能受影响，但不涉及资金安全。
+修复建议
+若需要扩展亲属检查范围，可在 BehaviorEngine 或单独合约中实现：
+// 同家族检查（最简单的近亲判断）
+bool sameFamilyRoot = familyTracker.familyRoot(a) == familyTracker.familyRoot(b);
+
+// 3层检查示意（需要额外 2次 SLOAD 查祖父）
+uint256 gfA = parents[parents[a].fatherId].fatherId; // a 的祖父
+if (gfA != NO_PARENT && gfA == b) return true;
+
+建议在 BehaviorEngine 的繁殖逻辑中增加 familyRoot 比较，作为近亲繁殖防护。
+
+问题描述
+合约没有维护「当前存活家族总数」的计数器。要获知系统中有多少个不同的家族（即有多少个不同的 familyRoot），只能通过链下扫描所有 GenesisRegistered 事件来统计。
+相关代码
+// 当前无此计数器
+// 要知道家族总数，需链下：
+// const events = await contract.queryFilter(GenesisRegistered)
+// const families = events.length  // 不完全准确（有headcount=0的空家族）
+影响分析
+链下 UI 无法低成本展示「当前存活家族数」等信息，影响数据面板建设效率。
+修复建议
+在 registerGenesis 中维护一个简单计数器（注意：家族灭绝时不自动减少，因为缺乏「headcount=0」的触发时机）：
+uint256 public totalFamiliesEverCreated;
+
+function registerGenesis(uint256 tokenId) external onlyGame {
+    ...
+    totalFamiliesEverCreated++;
+    ...
+}
+
+若需要「存活家族数」，可在 removeAgent 中检测 headcount 降至0时减少计数，但需维护 livingFamilies 计数器。
+
+5. 总结与修复优先级
+5.1 整体评估
+FamilyTracker 代码简洁，逻辑清晰。NO_PARENT 使用 type(uint256).max 的设计合理，6种固定亲属关系检查 gas 恒定的设计符合链上优化原则。主要风险集中在父系继承的设计意图确认（P-1）和状态清理完整性（P-3）。
+
+5.2 修复优先级
+
+5.3 与其他合约关联风险
+P-1（父系继承） 影响 BehaviorEngine 的繁殖行为：isDirectRelative 中的「同父兄弟/同母兄弟」检查与「familyRoot 只继承父方」在语义上存在设计不一致，需项目方统一澄清。
+P-3（状态清理） 影响 DeathEngine：DeathEngine._formallyDie() 调用 `family.removeAgent(id)`，目前该调用有 try-catch 保护，即使 removeAgent revert 也不影响死亡处理。但残留的 registered 状态可能影响链上数据查询的语义正确性。
+
+附录：FamilyTracker 关键函数速查
+
+— 审计报告结束 —
+合约地址 | 0x7D71118205FECBF4B62c2a5157c170588c6e9DD7
+合约名称 | FamilyTracker.sol
+合约类型 | 血缘追踪 — 家族根节点、人口统计、2层亲属关系检查
+编译器版本 | v0.8.24+commit.e11b9ed9
+部署时间 | 2026-03-04
+部署者 | 0xa172aBd7...2159ebB07
+审计日期 | 2026-03-05
+审计轮次 | 第4轮 (共9合约逐一审计)
+审计范围 | 详情
+合约文件 | FamilyTracker.sol（1文件，无外部依赖）
+核心职责 | 创世注册 · 子代注册（familyRoot继承）· 家族人口统计 · 2层亲属关系检查
+审计深度 | 全量源码审计，重点关注家族根节点继承逻辑、headcount 一致性、亲属判断完整性
+调用者 | onlyGame: 仅 BehaviorEngine (gameContract)  |  view 查询: 任意合约
+指标 | 当前数据
+直接交易数 | 仅部署交易（所有操作通过 BehaviorEngine 代理调用）
+gameContract | BehaviorEngine（0x293fbFC8...C23EA4D77），部署时注入，不可更改
+已注册 Agent 数 | 通过 registered mapping 记录，与 GenesisCore totalTokenCount 一致
+NO_PARENT 设计 | type(uint256).max = 2^256-1，不可能是合法 tokenId，设计合理
+合约持有资产 | 0 BNB，不持有任何 Token 或 NFT
+链上活跃情况 | BehaviorEngine 已有 448+ 笔活跃交易，registerGenesis/registerBirth 均已调用
+检查项 | 设计文档要求 | 合约实现 | 状态
+创世 Agent 注册 | familyRoot = 自身 tokenId | registerGenesis: familyRoot[tokenId]=tokenId | ✅
+子代继承 familyRoot | 继承父方 familyRoot | registerBirth: familyRoot[childId]=familyRoot[fatherId] | ⚠️ P-1
+家族人口统计 +1 | 出生时 headcount+1 | familyHeadcount[key]++ | ✅
+死亡人口扣减 | 死亡时 headcount-1 | removeAgent: familyHeadcount[key]--（加0防护） | ✅
+NO_PARENT sentinel | 防止 tokenId=0 误判 | type(uint256).max | ✅
+亲属判断 (6种关系) | 父子/母子/兄弟(同父/同母) | isDirectRelative: 6条fixed检查 | ✅
+重复注册防护 | 已注册则 revert | AlreadyRegistered revert | ✅
+未注册亲属引用防护 | 父母必须已注册 | NotRegistered revert | ✅
+headcount Key 格式 | 设计未明确规定 | keccak256(abi.encodePacked(rootId)) | ⚠️ P-2
+removeAgent 后状态清理 | 设计未明确规定 | 只减 headcount，不清除 registered | ⚠️ P-3
+编号 | 风险等级 | 问题描述 | 影响资金 | 紧急程度
+P-1 | 高风险 | familyRoot 只继承父系——母系血脉在链上完全消失 | 是(间接) | 重要设计决策
+P-2 | 中风险 | familyHeadcount 用 bytes32 Key 查询——前端若用 uint256 直查将永远返回 0 | 否 | 建议修复
+P-3 | 中风险 | removeAgent 不清除 registered 状态——死亡 Agent 可被重复注册 | 否 | 建议修复
+P-4 | 低风险 | isDirectRelative 只检查2层亲属，同祖父/同曾祖无法识别 | 否 | 设计限制
+P-5 | 低风险 | 无 totalFamilies 计数器——链上无法直接查询存活家族总数 | 否 | 建议添加
+P-1 | [高风险]  familyRoot 只继承父系——母系血脉在链上完全消失
+P-2 | [中风险]  familyHeadcount 使用 bytes32 Key——前端直接传 uint256 rootId 将永远查询到 0
+P-3 | [中风险]  removeAgent 不清除 registered 状态——死亡 Agent tokenId 可被重复注册
+P-4 | [低风险]  isDirectRelative 只检查2层亲属——祖父/堂兄弟等关系无法识别
+P-5 | [低风险]  无 totalFamilies 计数器——链上无法直接查询存活家族总数
+优先级 | 编号 | 问题 | 行动
+P0 | P-1 | familyRoot 只继承父系（设计确认） | 项目方确认是否为有意设计；若否，修改 registerBirth 双向记入
+P1 | P-2 | headcount 用 bytes32 key 查询易错 | 改 mapping(uint256=>uint256)；或文档明确禁用直接 getter
+P1 | P-3 | removeAgent 不清除 registered 等状态 | removeAgent 末尾加: registered=false; delete familyRoot; delete parents
+P2 | P-4 | 亲属检查限2层（设计限制） | 在 BehaviorEngine 的繁殖逻辑中增加 familyRoot 近亲检查
+P2 | P-5 | 无 totalFamilies 计数器 | registerGenesis 中加 totalFamiliesEverCreated++
+函数 | 可调用方 | 类型 | 备注
+registerGenesis(tokenId) | gameContract | 写 | 创世注册，familyRoot=自身，headcount+1
+registerBirth(childId, fatherId, motherId) | gameContract | 写 | 子代注册，familyRoot继承父方，headcount+1；见P-1
+removeAgent(tokenId) | gameContract | 写 | 减少headcount，不清除registered；见P-3
+isDirectRelative(a, b) | 任意 | view | 6种固定亲属关系检查，gas恒定不递归；见P-4
+getFamilyHeadcount(rootId) | 任意 | view | 正确查询家族人口，内部处理keccak256转换；见P-2
+getParents(tokenId) | 任意 | view | 返回 (fatherId, motherId)，创世返回 (NO_PARENT, NO_PARENT)
+familyHeadcount(bytes32 key) | 任意 | view | 直接mapping getter，需传keccak256(abi.encodePacked(rootId))；见P-2
+
+========== CodeDNA_Audit_05_EconomyEngine.txt ==========
+
+
+CodeDNA 智能合约安全审计报告
+ 
+
+合约 #5 — EconomyEngine (经济引擎)
+BNB Smart Chain 主网  持有 ~8.5亿 DNAGOLD 奖励池  ·  高价值合约
+
+
+1. 审计概述
+⚠️ 高价值合约警告： EconomyEngine 当前持有约 849,986,140 DNAGOLD（奖励池主要持仓），是整个 CodeDNA 系统中持有代币价值最高的合约。任何奖励发放逻辑缺陷都可能直接影响大量 DNAGOLD 的分配安全。
+
+EconomyEngine 负责 CodeDNA 的核心经济机制：双触发减半（人口+区块）、全局稀释、7因子产出计算、奖励分发（90%锁定/10%解锁）以及地块 Agent 列表追踪。合约持有大量 DNAGOLD 并通过 mintFree / addLocked 向 Agent 及宿主发放奖励。
+
+
+2. 链上实时状态
+
+3. 设计文档一致性核查
+
+4. 安全风险详情
+本次审计共发现 2个高风险、2个中风险、3个低风险 问题。其中 P-1 直接关系到 849,986,140 DNAGOLD 的发放安全，需优先处理。
+
+
+问题详情
+问题描述
+rewardAgent() 在发放奖励前检查 `dnagold.balanceOf(gameContract)`，若余额不足则 emit RewardSkipped 并返回。但实际发放奖励时，调用的是 `dnagold.mintFree(host, hostShare)` 和 `dnagold.addLocked(agentId, agentShare)`——mintFree 是铸造新代币，不需要 gameContract 持有余额；addLocked 是增加锁定记录，也不消耗 gameContract 的 ERC-20 余额。
+即：余额检查保护的是「gameContract 是否有足够 ERC-20 可用余额」，但实际消耗的是「DNAGold 合约的铸造权限」，两者逻辑脱钩。这导致余额检查实际上没有保护意义——只要 mintFree 权限存在，奖励就能无限发放；而若 gameContract 余额恰好不足，则正常奖励会被误判为「pool exhausted」而跳过。
+相关代码
+function rewardAgent(uint256 agentId, uint256 totalAmount) external onlyGame {
+    if (totalAmount == 0) return;
+
+    // ❌ 检查 gameContract 的 ERC-20 余额
+    uint256 poolBalance = dnagold.balanceOf(gameContract);
+    if (poolBalance < totalAmount) {
+        emit RewardSkipped(agentId, totalAmount, "pool exhausted");
+        return;  // 错误的保护：即使余额不足，mintFree 也可以执行
+    }
+
+    uint256 hostShare  = totalAmount / 10;
+    uint256 agentShare = totalAmount - hostShare;
+
+    address host = genesisCore.ownerOf(agentId);
+    if (hostShare > 0) {
+        dnagold.mintFree(host, hostShare);    // ✅ 铸造新代币，不消耗 gameContract 余额
+    }
+    if (agentShare > 0) {
+        dnagold.addLocked(agentId, agentShare); // ✅ 锁定记录，不消耗 gameContract 余额
+    }
+}
+影响分析
+奖励可能被错误地跳过：若 gameContract 的 DNAGOLD 余额因任何原因低于某次 calcGatherYield 的结果，正常应获得的奖励会被 RewardSkipped 静默跳过，玩家损失游戏收益。
+当前 gameContract（BehaviorEngine / EconomyEngine）持有约 8.5 亿 DNAGOLD，短期内余额检查不会触发；但随着游戏推进，若 DNAGOLD 持续被 mintFree 至宿主，gameContract 自身余额可能下降，届时 rewardAgent 会误判为「pool exhausted」，导致正常 Gather 奖励丢失。
+这是资金逻辑层面的高风险问题：直接影响玩家的 Gather 奖励发放正确性。
+修复建议
+明确奖励池的设计意图，选择对应修复方案：
+
+方案一（如果 mintFree 不受限——奖励无上限铸造）：移除错误的余额检查，直接发放：
+function rewardAgent(uint256 agentId, uint256 totalAmount) external onlyGame {
+    if (totalAmount == 0) return;
+    uint256 hostShare  = totalAmount / 10;
+    uint256 agentShare = totalAmount - hostShare;
+    address host = genesisCore.ownerOf(agentId);
+    if (hostShare > 0)  dnagold.mintFree(host, hostShare);
+    if (agentShare > 0) dnagold.addLocked(agentId, agentShare);
+    emit RewardDistributed(agentId, host, hostShare, agentShare);
+}
+
+方案二（如果需要总量上限——从 gameContract 余额转出）：将 mintFree 改为 ERC-20 transfer：
+// gameContract 需持有足够 DNAGOLD，奖励从其余额中扣除（真正消耗 pool）
+dnagold.transfer(host, hostShare);  // 替代 mintFree
+// addLocked 也需要相应调整为从 gameContract 余额扣除后锁定
+
+问题描述
+_checkAndHalve() 使用 while 循环处理积压的减半事件。正常情况下循环次数很少（1-2次），但若合约长期未调用（例如几年内无交易），再次调用时可能需要执行数百次 halvingCount++ 才能追平当前区块，每次循环消耗大量 gas（emit HalvingOccurred），导致交易 out-of-gas。
+同样的问题也可能被恶意构造：攻击者在时间维度上等待多个 HALVING_BLOCKS（约1年）后调用 incrementBorn，触发多次减半循环，使正常的 Gather/Reproduce 交易因调用 _checkAndHalve 而 gas 耗尽，实现 DoS 攻击。
+相关代码
+function _checkAndHalve() internal {
+    while (
+        block.number >= lastHalvingBlock + HALVING_BLOCKS ||
+        totalBornAgents >= (halvingCount + 1) * HALVING_POPULATION
+    ) {
+        halvingCount++;
+        lastHalvingBlock = block.number;
+        emit HalvingOccurred(halvingCount, block.number, totalBornAgents);
+        // 若积压 N 次减半，此循环执行 N 次，每次均消耗 SSTORE+SLOAD+emit ≈ 5000+ gas
+    }
+}
+
+// HALVING_BLOCKS = 10_512_000  (~1年)
+// 若合约停滞3年后被调用，while 循环可能执行3次
+// 若同时满足人口条件，可能更多
+影响分析
+在游戏早期（totalBornAgents < 500），时间维度的减半未触发（区块未到），循环基本执行0次，当前风险低。
+随着游戏成熟，若时间减半和人口减半同时积压，单笔 incrementBorn 交易的 gas 消耗将显著增加，可能导致常规 Gather/Reproduce 操作超出 BSC 区块 gas 上限（约 1.4 亿 gas），实现自然 DoS。
+halvingCount 是 uint256，无上限，理论上 BASE_YIELD >> halvingCount 在第 256 次减半后将变为 0，但届时 while 循环本身已经无法执行。
+修复建议
+为 _checkAndHalve 添加单次调用最大执行次数限制：
+uint256 public constant MAX_HALVINGS_PER_TX = 5;  // 单笔最多处理5次减半
+
+function _checkAndHalve() internal {
+    uint256 steps = 0;
+    while (
+        steps < MAX_HALVINGS_PER_TX && (
+            block.number >= lastHalvingBlock + HALVING_BLOCKS ||
+            totalBornAgents >= (halvingCount + 1) * HALVING_POPULATION
+        )
+    ) {
+        halvingCount++;
+        lastHalvingBlock = block.number;
+        emit HalvingOccurred(halvingCount, block.number, totalBornAgents);
+        steps++;
+    }
+}
+
+同时提供公开的 catchUpHalving() 函数，允许任意人分多笔 tx 追平积压的减半事件。
+
+问题描述
+getPlotLeader() 遍历地块上所有 Agent，对每个 Agent 调用一次 genesisCore.getAttributes()（外部调用）。单次外部调用约 2,100 gas（STATICCALL），若某地块聚集 100 个 Agent，单次 getPlotLeader 消耗约 210,000 gas；若 1,000 个 Agent 则超过 200 万 gas。
+calcGatherYield 在 BehaviorEngine 中每次 Gather 都可能间接调用 getPlotLeader（用于判断 isLeader 参数），使每次 Gather 的 gas 成本随地块人数线性增长。
+相关代码
+function getPlotLeader(uint256 plotId) public view returns (uint256 leaderId) {
+    uint256[] storage agents = _plotAgents[plotId];
+    uint256 len = agents.length;
+    if (len == 0) return type(uint256).max;
+
+    uint256 maxLeadership = 0;
+    leaderId = agents[0];
+
+    for (uint256 i = 0; i < len; i++) {
+        // ❌ 每次循环一次外部调用：约 2,100 gas × len 次
+        (uint16[8] memory attrs, ) = genesisCore.getAttributes(agents[i]);
+        uint256 leadership = uint256(attrs[1]);
+        if (leadership > maxLeadership) {
+            maxLeadership = leadership;
+            leaderId = agents[i];
+        }
+    }
+}
+影响分析
+在当前早期阶段（每地块 Agent 数极少），此问题影响可忽略。但随着游戏规模扩大，热门地块（如矿脉 MINE，3倍产出）将吸引大量 Agent 聚集，导致每次 Gather 的 gas 消耗飙升，使该地块的 Gather 操作实际不可用（gas 超限）。
+由于 Leader 加成（+15%）具有经济激励，玩家会主动争夺 Leader 位置，进一步推动 Agent 向高价值地块聚集，形成正反馈的 gas 恶化。
+修复建议
+方案一：缓存 Leadership 属性，在 Agent 属性变化时更新：
+mapping(uint256 => uint256) internal _agentLeadership;  // agentId => leadership值
+// 在 addAgentToPlot/removeAgentFromPlot 时同步更新缓存
+
+方案二：维护地块 Leader 缓存，仅在需要时重新计算：
+mapping(uint256 => uint256) public plotLeader;  // plotId => leaderId
+// 在 Agent 进入/离开地块时更新 Leader
+
+方案三：限制单地块最大 Agent 数（添加地块容量上限）：
+uint256 public constant MAX_AGENTS_PER_PLOT = 50;
+
+问题描述
+moveAgentPlot() 内部手动实现了「从旧地块移除 Agent」的逻辑，而 removeAgentFromPlot() 也实现了同样的逻辑，但两者不复用。若未来需要修改「swap-and-pop 移除逻辑」（如修复边界条件），必须同时修改两处，容易遗漏，导致行为不一致。
+相关代码
+// removeAgentFromPlot 的移除逻辑
+function removeAgentFromPlot(uint256 agentId, uint256 plotId) external onlyGame {
+    if (!_agentInPlot[agentId]) return;
+    uint256[] storage agents = _plotAgents[plotId];
+    uint256 index = _plotAgentIndex[agentId];
+    uint256 lastIndex = agents.length - 1;
+    if (index != lastIndex) {
+        uint256 lastAgent = agents[lastIndex];
+        agents[index] = lastAgent;
+        _plotAgentIndex[lastAgent] = index;
+    }
+    agents.pop();
+    delete _plotAgentIndex[agentId];
+    _agentInPlot[agentId] = false;
+}
+
+// moveAgentPlot 内部重复了相同逻辑（约15行相同代码）
+function moveAgentPlot(uint256 agentId, uint256 fromPlot, uint256 toPlot) external onlyGame {
+    if (_agentInPlot[agentId]) {
+        // 👇 与 removeAgentFromPlot 完全重复的 swap-and-pop 逻辑
+        uint256[] storage fromAgents = _plotAgents[fromPlot];
+        ...
+    }
+    // 加入新地块
+    _plotAgentIndex[agentId] = _plotAgents[toPlot].length;
+    _plotAgents[toPlot].push(agentId);
+    _agentInPlot[agentId] = true;
+}
+影响分析
+若移除逻辑存在 bug，需同时修复两处。若未来修改其中一处而遗漏另一处，会导致 moveAgentPlot 和 remove+add 两种路径行为不一致，影响地块 Agent 列表的正确性。
+修复建议
+提取内部辅助函数，消除重复：
+function _removeFromPlot(uint256 agentId, uint256 plotId) internal {
+    if (!_agentInPlot[agentId]) return;
+    uint256[] storage agents = _plotAgents[plotId];
+    uint256 index = _plotAgentIndex[agentId];
+    uint256 lastIndex = agents.length - 1;
+    if (index != lastIndex) {
+        uint256 lastAgent = agents[lastIndex];
+        agents[index] = lastAgent;
+        _plotAgentIndex[lastAgent] = index;
+    }
+    agents.pop();
+    delete _plotAgentIndex[agentId];
+    _agentInPlot[agentId] = false;
+}
+
+// removeAgentFromPlot 和 moveAgentPlot 均调用 _removeFromPlot
+
+问题描述
+incrementLiving() 每次调用均无条件 totalLivingAgents++，没有上限限制，也没有与 totalBornAgents 的一致性检查。若 BehaviorEngine 在非预期场景下多次调用，存活人口数可超过出生总人口数，导致 getGlobalDilutionFactor() 的稀释计算出现异常值。
+相关代码
+function incrementLiving() external onlyGame {
+    totalLivingAgents++;  // 无上限，无与 totalBornAgents 的一致性检查
+}
+
+// 若 totalLivingAgents > BASELINE_POPULATION (10,000)
+// getGlobalDilutionFactor = (10000 * 1000) / totalLivingAgents
+// totalLivingAgents 被人为拉高会错误增加稀释，降低所有 Agent 产出
+影响分析
+若被错误多次调用，totalLivingAgents 虚高会导致全局稀释因子虚低，所有 Agent 的 Gather 产出被错误削减。但由于 onlyGame 权限限制，触发需要 BehaviorEngine 出现逻辑 bug，实际风险较低。
+修复建议
+添加一致性上限检查：
+function incrementLiving() external onlyGame {
+    // 存活人口不应超过出生总数
+    require(totalLivingAgents < totalBornAgents, "living exceeds born");
+    totalLivingAgents++;
+}
+
+问题描述
+getGlobalDilutionFactor() 在 totalLivingAgents <= BASELINE_POPULATION 时返回 1000（无稀释），这在正常游戏运行中是正确的。但当 totalLivingAgents == 0（游戏刚启动或所有 Agent 全部死亡）时，同样返回 1000，意味着「零人口时产出系数为100%」，这在语义上可能与设计意图不符。
+相关代码
+function getGlobalDilutionFactor() public view returns (uint256) {
+    if (totalLivingAgents <= BASELINE_POPULATION) return 1000;  // 含 totalLivingAgents=0
+    return (BASELINE_POPULATION * 1000) / totalLivingAgents;
+    // totalLivingAgents=0 → 返回 1000（全额产出）
+    // 若设计期望零人口时不应产出，此处是边界 bug
+}
+影响分析
+若游戏启动时第一批 Agent 被放置但尚未 incrementBorn（totalLivingAgents=0），此时调用 calcGatherYield 仍会计算出正常产出，可能导致极早期阶段的奖励计算略有偏差。实际影响极小，因为 getAttributes 调用会先失败。
+修复建议
+如果零人口时期望不产出，可添加零值检查：
+function getGlobalDilutionFactor() public view returns (uint256) {
+    if (totalLivingAgents == 0) return 0;  // 零人口不稀释但也无产出（可选）
+    if (totalLivingAgents <= BASELINE_POPULATION) return 1000;
+    return (BASELINE_POPULATION * 1000) / totalLivingAgents;
+}
+注：若零人口时的 Gather 本身不会发生（Agent 不存在），则此边界无实际影响，可保留现状并加注释说明。
+
+问题描述
+addAgentToPlot() 在 Agent 已在列表中时直接 return，不触发任何事件也不 revert。对于调试和链上状态监控，静默忽略可能掩盖调用链的错误（例如 BehaviorEngine 意外地对已在地块的 Agent 再次 addAgentToPlot）。
+相关代码
+function addAgentToPlot(uint256 agentId, uint256 plotId) external onlyGame {
+    if (_agentInPlot[agentId]) return;  // 静默忽略重复添加
+    _plotAgentIndex[agentId] = _plotAgents[plotId].length;
+    _plotAgents[plotId].push(agentId);
+    _agentInPlot[agentId] = true;
+}
+影响分析
+重复添加在业务上不应发生（BehaviorEngine 有 WorldMap.agentOnMap 保护），静默忽略不影响数据正确性，但会掩盖调用链的逻辑错误，增加调试难度。
+修复建议
+添加重复添加检测事件（不建议 revert，保持幂等性）：
+event DuplicateAddAttempt(uint256 indexed agentId, uint256 plotId);
+
+function addAgentToPlot(uint256 agentId, uint256 plotId) external onlyGame {
+    if (_agentInPlot[agentId]) {
+        emit DuplicateAddAttempt(agentId, plotId);  // 发出警告事件
+        return;
+    }
+    ...
+
+5. 总结与修复优先级
+5.1 整体评估
+EconomyEngine 是 CodeDNA 系统中持有资产价值最高的合约，持有约 8.5 亿 DNAGOLD。7因子产出公式设计合理，千分比连乘精度损失可接受，减半机制的双触发逻辑也符合设计文档。核心问题集中在奖励发放逻辑的设计脱钩（P-1）和减半循环的 gas 安全（P-2），这两项均为高风险，需优先处理。
+
+5.2 修复优先级
+
+5.3 与其他合约关联风险
+P-1（奖励发放） 直接影响 DNAGold：若使用 mintFree 模式，需确认 DNAGold 的 mintFree 权限是否有总量上限（通胀保护）；若没有上限，每次 Gather 都会新铸 DNAGOLD，需要通过游戏经济设计（稀释+减半）平衡供给。
+P-2（减半 gas） 影响 BehaviorEngine：所有通过 BehaviorEngine 调用 incrementBorn 的 Reproduce 操作，以及调用 checkAndHalve 的场景，均受此 gas 风险影响。
+P-3（Leader O(n)） 影响 BehaviorEngine 的 Gather 操作：calcGatherYield 的 isLeader 参数需要先调用 getPlotLeader，若在高密度地块 Gather 则 gas 成本激增。
+
+附录：EconomyEngine 关键函数速查
+
+— 审计报告结束 —
+合约地址 | 0x615DBE2117c8D68514bA14aC8f9E026045977F7a
+合约名称 | EconomyEngine.sol
+合约类型 | 经济引擎 — 减半、稀释、产出计算、奖励分发
+编译器版本 | v0.8.24+commit.e11b9ed9
+部署时间 | 2026-03-04
+部署者 | 0xa172aBd7...2159ebB07
+审计日期 | 2026-03-05
+持有资产 | 849,986,140 DNAGOLD（奖励池主要持仓）
+审计轮次 | 第5轮 (共9合约逐一审计)
+审计范围 | 详情
+合约文件 | EconomyEngine.sol（1文件，依赖 DNAGold、GenesisCore、WorldMap 接口）
+核心职责 | 减半机制 · 稀释计算 · 产出公式 · 奖励分发 · 地块Agent列表维护
+审计重点 | 奖励池逻辑正确性、减半循环安全性、产出计算精度、地块列表一致性
+调用者 | onlyGame: 仅 BehaviorEngine  |  view 查询: 任意合约（含 AgentBridge）
+持有资产 | 849,986,140 DNAGOLD（链上已确认，2026-03-04 区块）
+指标 | 当前数据
+交易总数 | 448+ 笔（通过 BehaviorEngine 代理，Gather/Reproduce 均已调用）
+DNAGOLD 持有量 | 849,986,140 DNAGOLD（奖励池）
+gameContract | BehaviorEngine（0x293fbFC8...C23EA4D77）
+halvingCount | 0（尚未触发减半，totalBornAgents < 500）
+totalBornAgents | 约5-15（通过 Reproduce 交易推算，早期阶段）
+BASE_YIELD | 100 DNAGOLD（halvingCount=0，当前全额发放）
+检查项 | 设计文档要求 | 合约实现 | 状态
+减半触发条件 | 人口+时间双触发 while 循环 | _checkAndHalve: while(block>=lastHalving+BLOCKS || totalBorn>=next*500) | ⚠️ P-2
+减半步长 | 每500出生一次 | HALVING_POPULATION=500 | ✅
+区块减半 | 约1年（10,512,000块） | HALVING_BLOCKS=10_512_000 | ✅
+BASE_YIELD | 100 DNAGOLD（草原基准） | BASE_YIELD=100*1e18 | ✅
+稀释基准人口 | 10,000人以下无稀释 | BASELINE_POPULATION=10_000 | ✅
+产出计算 | 7因子千分比连乘 | calcGatherYield: base*plotMult*iqMult*strMult*leaderMult*dilution/competitionDiv | ✅
+IQ 系数范围 | 0.8-1.8 | 800+(iqScore*1000/255)=800-1800 | ✅
+STRENGTH 系数 | 1.0-1.5 | 1000+(strScore*500/255)=1000-1500 | ✅
+领袖加成 | +15% | leaderMult=1150 vs 1000 | ✅
+竞争惩罚 | 平方惩罚 | competitionDiv=plotCount^2 | ✅
+奖励分配 | 90%锁定给Agent，10%解锁给宿主 | agentShare=90%, hostShare=10% | ✅
+奖励池检查 | 池子不足时静默跳过 | poolBalance check + RewardSkipped event | ⚠️ P-1
+编号 | 风险等级 | 问题描述 | 影响资金 | 紧急程度
+P-1 | 高风险 | rewardAgent 奖励池余额检查逻辑错误——检查 gameContract 余额但从 mintFree 铸造 | 是(直接) | 立即修复
+P-2 | 高风险 | _checkAndHalve while 循环——恶意调用者可触发大量减半造成 gas 耗尽 | 是(间接) | 立即修复
+P-3 | 中风险 | getPlotLeader 循环调用 genesisCore.getAttributes——O(n) 外部调用，高密度地块可 DoS | 否 | 建议修复
+P-4 | 中风险 | removeAgentFromPlot 与 moveAgentPlot 逻辑重复——代码冗余增加维护风险 | 否 | 建议重构
+P-5 | 低风险 | incrementLiving 无上限保护——totalLivingAgents 可超过 totalBornAgents | 否 | 建议修复
+P-6 | 低风险 | 稀释因子在 totalLivingAgents=0 时返回 1000（100%）——可能与零人口边界不符 | 否 | 建议确认
+P-7 | 低风险 | 无 addAgentToPlot 的重复添加事件——重复添加被静默忽略 | 否 | 建议优化
+P-1 | [高风险]  rewardAgent 奖励池余额检查逻辑错误——检查 gameContract 余额但通过 mintFree 铸造新代币
+P-2 | [高风险]  _checkAndHalve while 循环——大量减半积压后单次触发耗尽 gas
+P-3 | [中风险]  getPlotLeader 循环调用 genesisCore.getAttributes——O(n) 外部调用，高密度地块可软 DoS
+P-4 | [中风险]  removeAgentFromPlot 与 moveAgentPlot 代码冗余——移除逻辑重复实现，维护风险高
+P-5 | [低风险]  incrementLiving 无调用场景保护——totalLivingAgents 可被超量递增
+P-6 | [低风险]  稀释因子在人口归零时返回 1000 (100%)——边界语义需确认
+P-7 | [低风险]  addAgentToPlot 重复添加被静默忽略——缺乏重复添加事件通知
+优先级 | 编号 | 问题 | 行动
+P0 | P-1 | rewardAgent 奖励池检查逻辑脱钩（直接影响DNAGOLD发放） | 明确奖励机制：mintFree 模式删除余额检查；transfer 模式保留
+P0 | P-2 | 减半 while 循环无执行次数上限 | 加 MAX_HALVINGS_PER_TX 上限 + 公开 catchUpHalving() 函数
+P1 | P-3 | getPlotLeader O(n) 外部调用 | 缓存 Leadership 属性或增加地块容量上限
+P1 | P-4 | swap-and-pop 逻辑代码重复 | 提取 _removeFromPlot() 内部函数
+P2 | P-5/6/7 | 人口一致性/零值边界/重复添加静默 | 添加一致性检查、边界注释、DuplicateAdd事件
+函数 | 可调用方 | 类型 | 备注
+checkAndHalve() | gameContract | 写 | 触发双条件减半（外部入口）；见P-2
+_checkAndHalve() | internal | 写 | while 循环减半逻辑；见P-2
+getCurrentBaseYield() | 任意 | view | BASE_YIELD >> halvingCount
+getGlobalDilutionFactor() | 任意 | view | 人口>10000时线性稀释；见P-6
+calcGatherYield(agentId,plotId,plotCount,isLeader) | 任意 | view | 7因子产出公式，核心计算
+getPlotLeader(plotId) | 任意 | view | O(n) 外部调用循环；见P-3
+getPlotAgents(plotId) | 任意 | view | 返回地块Agent列表
+rewardAgent(agentId, amount) | gameContract | 写 | 10%宿主+90%锁定；奖励池逻辑见P-1
+incrementBorn() | gameContract | 写 | 出生+1，触发减半检查
+incrementLiving() | gameContract | 写 | 仅增存活人口；见P-5
+decrementLiving() | gameContract | 写 | 死亡-1（含0保护）
+addAgentToPlot(agentId,plotId) | gameContract | 写 | 幂等；见P-7
+removeAgentFromPlot(agentId,plotId) | gameContract | 写 | swap-and-pop；见P-4
+moveAgentPlot(agentId,fromPlot,toPlot) | gameContract | 写 | 重复移除逻辑；见P-4
+
+========== CodeDNA_Audit_06_DeathEngine.txt ==========
+
+
+CodeDNA 智能合约安全审计报告
+ 
+
+合约 #6 — DeathEngine (死亡引擎)
+BNB Smart Chain 主网  寿命 · 饥饿 · 战斗 · 死亡清理编排
+
+
+1. 审计概述
+DeathEngine 是 CodeDNA 系统的死亡仲裁合约，负责判断 Agent 是否应该死亡（自然老化、饥饿、战斗）并编排死亡清理流程（地图移除、家族注销、人口统计更新）。合约本身不持有任何资产，但其正确性直接影响链上 Agent 存活状态的一致性，进而影响 EconomyEngine 的产出计算和 FamilyTracker 的人口统计。
+
+
+2. 链上实时状态
+
+3. 设计文档一致性核查
+
+4. 安全风险详情
+本次审计共发现 2个高风险、2个中风险、2个低风险 问题。P-1 的 try-catch 设计可导致 Agent 进入状态不一致的「半死」状态；P-2 的饥饿检测存在被绕过的风险，需在饥饿窗口开启前修复。
+
+
+问题详情
+问题描述
+_formallyDie() 是死亡清理的核心编排函数，依次调用 WorldMap.removeAgent、FamilyTracker.removeAgent、EconomyEngine.decrementLiving 三个外部合约。每个调用都包裹在独立的 try-catch 中，任何一个调用失败时仅 emit 一个警告事件，然后继续执行下一步。
+这意味着：若 WorldMap.removeAgent 失败（Agent 仍在地图上），但后续调用成功，则会出现「Agent 在 DeathEngine 已标记为 isDead=true，但在 WorldMap 中仍然存在」的不一致状态。此时地图上有一个「死亡的幽灵 Agent」，其 Gather 交易可能仍被 BehaviorEngine 接受（因为 WorldMap.agentOnMap 仍为 true）。
+相关代码
+function _formallyDie(uint256 tokenId, string memory cause) internal {
+    isDead[tokenId] = true;  // 先标记死亡
+    emit AgentDied(tokenId, cause);
+
+    // ❌ try-catch 吞掉失败，可导致状态不一致
+    try worldMap.removeAgent(tokenId) {} catch {
+        emit DeathCleanupFailed(tokenId, "worldmap");  // 仅事件，继续执行
+    }
+    try family.removeAgent(tokenId) {} catch {
+        emit DeathCleanupFailed(tokenId, "family");
+    }
+    try economy.decrementLiving() {} catch {
+        emit DeathCleanupFailed(tokenId, "economy");
+    }
+    // 执行结束后 isDead=true，但三个下游合约可能任一失败
+}
+影响分析
+最严重场景：WorldMap.removeAgent 失败（例如因 revert），Agent 仍留在地图上。BehaviorEngine 在后续检查时若优先判断 isDead 则拒绝操作，但若优先判断 agentOnMap 则可能允许「死亡 Agent」继续 Gather，产生非法奖励。
+次严重场景：FamilyTracker.removeAgent 失败，家族 headcount 不减少，家族人口虚高，影响 EconomyEngine 的稀释计算。
+当前游戏早期（无死亡发生），此问题尚未实际触发，但一旦首批 Agent 开始死亡，此风险窗口立即开启。
+修复建议
+方案一（推荐）：移除 try-catch，让任意下游失败直接 revert，保证原子性：
+function _formallyDie(uint256 tokenId, string memory cause) internal {
+    isDead[tokenId] = true;
+    worldMap.removeAgent(tokenId);   // 失败则整体 revert
+    family.removeAgent(tokenId);
+    economy.decrementLiving();
+    emit AgentDied(tokenId, cause);  // 全部成功后再 emit
+}
+
+方案二（如果下游失败是预期可接受的）：保留 try-catch，但添加恢复机制：
+// 记录未完成清理的 Agent，提供 retryCleaup(tokenId) 函数
+mapping(uint256 => bool) public pendingCleanup;
+// 在 try-catch 失败时设置 pendingCleanup[tokenId] = true
+// 提供 retryCleanup(tokenId) external 允许重试清理
+
+问题描述
+checkStarvation() 通过读取 BehaviorEngine（或专用状态合约）中的 lastGatherBlock[tokenId] 来判断 Agent 是否饥饿。若 BehaviorEngine 在每次成功 Gather 后没有正确更新 lastGatherBlock，或者 lastGatherBlock 的初始值为 0（Agent 出生时），则 block.number - 0 > STARVATION_BLOCKS 在区块高度超过 201,600 后对所有 Agent 永远为 true，导致所有 Agent 立即可被饥饿判定。
+反之，若 lastGatherBlock 初始化为 block.number（出生区块），则逻辑正确；但若 BehaviorEngine 使用了不一致的初始化时机（如首次 Gather 后才设置，而非出生时），则初次 Gather 之前的 Agent 都可能被误判为饥饿。
+这取决于 BehaviorEngine 的 lastGatherBlock 初始化策略，需与合约 #7 BehaviorEngine 联合审查。
+相关代码
+function checkStarvation(uint256 tokenId) public view returns (bool) {
+    if (isDead[tokenId]) return false;
+    uint256 lastGather = behaviorEngine.getLastGatherBlock(tokenId);
+    // ❌ 若 lastGather == 0（未初始化），则任何区块高度 > 201600 时均返回 true
+    return block.number - lastGather > STARVATION_BLOCKS;
+}
+
+// 潜在触发条件：
+// 当前区块高度（BSC 2026-03）约 ~46,000,000
+// 若 lastGather=0，则 46,000,000 - 0 > 201,600 → true → 所有未Gather的Agent即时饥饿
+影响分析
+若 lastGatherBlock 初始化为 0，在当前 BSC 区块高度（约 4,600 万）下，所有从未 Gather 过的 Agent（包括刚出生的新 Agent）都将被立即判定为饥饿，可被 BehaviorEngine 调用死亡，导致大量 Agent 意外死亡。
+这是一个潜在的「批量死亡漏洞」，虽然当前游戏早期 Agent 数量少、影响有限，但随着 Agent 数量增长，此问题的破坏力将线性增加。
+需要与 BehaviorEngine（合约 #7）联合确认 lastGatherBlock 的初始化和更新策略。
+修复建议
+确保 BehaviorEngine 在 Agent 出生时将 lastGatherBlock[tokenId] = block.number（而非 0）：
+// 在 BehaviorEngine.registerBirth 或 GenesisCore 回调中：
+lastGatherBlock[tokenId] = block.number;  // 出生区块即首次存活时间戳
+
+同时在 DeathEngine.checkStarvation 添加防御性检查：
+function checkStarvation(uint256 tokenId) public view returns (bool) {
+    if (isDead[tokenId]) return false;
+    uint256 lastGather = behaviorEngine.getLastGatherBlock(tokenId);
+    if (lastGather == 0) return false;  // 未初始化时视为刚出生，不饥饿
+    return block.number - lastGather > STARVATION_BLOCKS;
+}
+
+问题描述
+_calcLifespan() 在 Agent 出生时确定其寿命，随机扰动因子基于 keccak256(block.number, tokenId) % 400 + 800，范围 800-1200（即 ±20% 随机）。BSC 验证者可通过选择在哪个区块打包出生交易来影响 block.number，从而影响随机结果。虽然操控范围仅为 ±20%（寿命 ±200,000 区块），但对于热门 Agent（高属性创世 Agent），其宿主可能有动机延长寿命。
+相关代码
+function _calcLifespan(uint256 tokenId, uint256 iqScore) internal view returns (uint256) {
+    // ❌ 可预测的随机源：验证者可选择区块影响结果
+    uint256 randFactor = uint256(keccak256(abi.encodePacked(
+        block.number,  // 验证者可控
+        tokenId        // 公开可预测
+    ))) % 400 + 800;  // 范围 800-1200
+
+    uint256 iqFactor = 500 + (iqScore * 1000 / 255);  // 500-1500
+    return BASE_LIFESPAN * iqFactor / 1000 * randFactor / 1000;
+}
+影响分析
+操控难度较高（需要 BSC 验证者权限或贿赂验证者），且收益有限（仅影响寿命 ±20%），实际攻击成本远高于收益。
+但对于游戏公平性和玩家信任度有一定影响。若高属性创世 Agent（稀缺资产）的宿主恰好是 BSC 验证者，此攻击向量值得关注。
+修复建议
+方案一：引入更多不可预测参数，提高操控成本：
+uint256 randFactor = uint256(keccak256(abi.encodePacked(
+    block.prevrandao,   // BSC EIP-4399 后可用
+    block.timestamp,    // 额外随机维度
+    tokenId,
+    msg.sender          // 调用者地址
+))) % 400 + 800;
+
+方案二：接受现状并在游戏文档中披露随机源，说明随机范围和操控难度，满足信息透明要求。
+
+问题描述
+resolveCombat() 使用 keccak256(block.number, attacker, defender) % 2 决定战斗胜负，即纯50%随机胜率。设计文档描述战斗结果应受 STRENGTH（力量）等属性影响，使高强壮 Agent 在战斗中具有优势。当前实现中属性完全不影响战斗结果。
+这使得战斗系统失去策略性——玩家无法通过培育高战斗属性的 Agent 来获得战斗优势，弱化了 GenesisCore 属性系统在战斗场景中的价值。
+相关代码
+function resolveCombat(uint256 attacker, uint256 defender) external onlyGame returns (bool attackerWins) {
+    // ❌ 纯随机，不考虑 attacker/defender 的 STRENGTH 属性
+    uint256 rand = uint256(keccak256(abi.encodePacked(
+        block.number, attacker, defender
+    ))) % 100;
+    attackerWins = rand < 50;  // 固定50%胜率
+    if (!attackerWins) {
+        _formallyDie(attacker, "combat");
+    } else {
+        _formallyDie(defender, "combat");
+    }
+    emit CombatResolved(attacker, defender, attackerWins);
+}
+影响分析
+战斗系统的策略价值为零，玩家无法通过 Agent 属性培育获得战斗优势，STRENGTH 属性在战斗场景中形同虚设。若设计文档明确要求属性影响战斗，则此为功能缺失。
+同时，纯随机战斗结合 P-3 的随机源问题，使得 BSC 验证者在某种程度上也能影响战斗结果（通过影响 block.number）。
+修复建议
+若设计意图是属性影响胜率，可添加 STRENGTH 加权：
+function resolveCombat(uint256 attacker, uint256 defender) external onlyGame returns (bool attackerWins) {
+    (uint16[8] memory aAttrs, ) = genesisCore.getAttributes(attacker);
+    (uint16[8] memory dAttrs, ) = genesisCore.getAttributes(defender);
+    uint256 aStr = uint256(aAttrs[2]);  // STRENGTH
+    uint256 dStr = uint256(dAttrs[2]);
+    // 攻击者胜率 = 30% + (aStr / (aStr+dStr)) * 40%，范围30%-70%
+    uint256 attackerOdds = 3000 + (aStr * 4000 / (aStr + dStr + 1));
+    uint256 rand = uint256(keccak256(abi.encodePacked(block.prevrandao, attacker, defender))) % 10000;
+    attackerWins = rand < attackerOdds;
+    ...
+}
+
+问题描述
+isNaturalDeathDue() 计算 `birthBlock + lifespan` 时，虽然在 Solidity 0.8.x 中算术溢出会自动 revert，但若 birthBlock 为非常大的值（理论极端情况），加法 revert 会导致函数永远无法成功调用，使 Agent 永远无法自然死亡（immortal bug）。在实际 BSC 区块高度（约 4,600 万）和正常寿命（约 100-200 万区块）下，此溢出实际上不可能发生，但值得记录。
+相关代码
+function isNaturalDeathDue(uint256 tokenId) public view returns (bool) {
+    AgentLife storage life = agentLife[tokenId];
+    if (life.birthBlock == 0) return false;
+    // Solidity 0.8 中若 birthBlock + lifespan > type(uint256).max 则 revert
+    // 实际不可达（BSC区块~46M，lifespan~100-200万，总和远小于2^256）
+    return block.number >= life.birthBlock + life.lifespan;
+}
+影响分析
+在当前 BSC 部署环境下，此溢出实际上不可能发生。记录于此仅作为代码健壮性改进建议。
+修复建议
+使用 unchecked 外包装并手动检查，或使用更安全的写法：
+return life.lifespan <= block.number - life.birthBlock;
+// 先用减法（不可能下溢，因为 block.number 总是 >= birthBlock）再比较，避免加法溢出
+
+问题描述
+_formallyDie 执行后，WorldMap 移除地图记录、FamilyTracker 删除 familyRoot/parents 记录、EconomyEngine 移除地块记录。isDead[tokenId] = true 是唯一留存的链上证明，但除死因（事件）外，Agent 的完整历史（出生、位置、家族）已无法从链上状态读取。
+这使得链上的「文明史」无法追溯，也无法构建「死亡图鉴」等功能。
+影响分析
+当前设计优先考虑 gas 效率（清理状态退还 gas），可以接受。若需要历史记录，建议在 emit AgentDied 中增加完整死亡快照信息，让链下服务通过事件日志重建历史，而无需修改链上存储。
+例如：emit AgentDied(tokenId, cause, birthBlock, lifespan, familyRoot, lastPlotId)
+修复建议
+在 AgentDied 事件中增加死亡时的关键状态快照（familyRoot、lastPlotId、totalRewardEarned 等），链下服务可通过扫描事件完整重建文明历史，无需额外 gas。
+
+5. 总结与修复优先级
+5.1 整体评估
+DeathEngine 的寿命计算、饥饿检测、战斗判定逻辑结构清晰，重复死亡防护完备。核心风险集中在死亡清理的 try-catch 设计（P-1） 和 饥饿检测的初始化依赖（P-2），这两项需在首批 Agent 进入死亡窗口前修复。当前游戏早期（约7天内无饥饿、约1年内无自然死亡），修复窗口充裕。
+
+5.2 修复优先级
+
+5.3 与其他合约关联风险
+P-1（死亡清理原子性） 影响 WorldMap（地图幽灵Agent）、FamilyTracker（headcount 虚高）、EconomyEngine（稀释异常），需与这三个合约联合审查死亡清理路径。
+P-2（饥饿初始化） 强依赖 BehaviorEngine（合约 #7）的 lastGatherBlock 初始化策略，需在 BehaviorEngine 审计中优先核实。
+P-4（战斗胜率） 与 GenesisCore（合约 #1）的 STRENGTH 属性系统联动，若设计文档要求属性影响战斗，需同步 GenesisCore 的属性接口调用。
+
+附录：DeathEngine 关键函数速查
+
+— 审计报告结束 —
+合约地址 | 0xBfD40B2B8B9C9F5a51D2F8DD9D88Cb7e23eC4021
+合约名称 | DeathEngine.sol
+合约类型 | 死亡引擎 — 寿命计算、饥饿、战斗死亡、死亡清理编排
+编译器版本 | v0.8.24+commit.e11b9ed9
+部署时间 | 2026-03-04
+部署者 | 0xa172aBd7...2159ebB07
+审计日期 | 2026-03-05
+持有资产 | 0 BNB，0 DNAGOLD（协调合约，不持有资产）
+审计轮次 | 第6轮 (共9合约逐一审计)
+审计范围 | 详情
+合约文件 | DeathEngine.sol（1文件，依赖 GenesisCore、WorldMap、FamilyTracker、EconomyEngine 接口）
+核心职责 | 自然死亡判定 · 饥饿死亡判定 · 战斗死亡 · 死亡清理编排（4合约协调）
+审计重点 | try-catch 异常处理完整性、死亡条件触发正确性、随机源安全性、状态清理原子性
+调用者 | onlyGame: 仅 BehaviorEngine  |  公开查询: checkStarvation、isNaturalDeathDue
+指标 | 当前数据
+直接交易数 | 仅部署交易（所有调用通过 BehaviorEngine 代理）
+已处理死亡数 | 0（游戏早期，无 Agent 达到自然寿命，STARVATION_BLOCKS 尚未到期）
+gameContract | BehaviorEngine（0x293fbFC8...C23EA4D77）
+持有资产 | 0 BNB，0 DNAGOLD
+当前风险窗口 | 饥饿窗口：约7天后第一批 Agent 开始进入饥饿判定，P-2 风险窗口即将开启
+检查项 | 设计文档要求 | 合约实现 | 状态
+寿命计算基准 | 1,000,000 区块 ± IQ影响 | BASE_LIFESPAN=1_000_000，IQ系数0.5-1.5倍 | ✅
+寿命随机扰动 | ±20% 随机 | randFactor: block.number+tokenId keccak % 400 + 800 (800-1200/1000) | ⚠️ P-3
+自然死亡检查 | birthBlock + lifespan <= currentBlock | isNaturalDeathDue: block.number >= birthBlock+lifespan | ⚠️ P-5
+饥饿检测 | N区块未Gather则死亡 | checkStarvation: block.number - lastGatherBlock > STARVATION_BLOCKS | ⚠️ P-2
+战斗死亡 | 攻击者胜率公式 | 50% 随机（keccak伪随机） | ⚠️ P-4
+死亡清理顺序 | map移除→family记录→统计扣减 | _formallyDie: map/family/economy 三步 try-catch | ⚠️ P-1
+死亡事件 | emit AgentDied(tokenId, cause) | emit AgentDied(tokenId, deathCause) | ✅
+重复死亡防护 | 已死不可再死 | isDead[tokenId] check + AlreadyDead revert | ✅
+STARVATION_BLOCKS | 约7天(201,600块) | STARVATION_BLOCKS=201_600 | ✅
+寿命IQ系数 | 高IQ长寿 | iqScore*1000/255 + 500 → 500-1500（0.5x-1.5x） | ✅
+编号 | 风险等级 | 问题描述 | 影响资金 | 紧急程度
+P-1 | 高风险 | _formallyDie 使用 try-catch 吞掉下游失败——Agent 可能处于半死不活状态 | 是(间接) | 立即修复
+P-2 | 高风险 | checkStarvation 饥饿触发依赖外部 lastGatherBlock——BehaviorEngine 若未更新则永不饥饿 | 是(间接) | 立即修复
+P-3 | 中风险 | _calcLifespan 随机源为 block.number+tokenId——可被矿工/验证者小幅操控 | 否 | 建议改进
+P-4 | 中风险 | 战斗死亡无装备/属性加成——纯随机50%胜率，与设计文档不符 | 否 | 设计确认
+P-5 | 低风险 | isNaturalDeathDue 区块溢出风险——birthBlock + lifespan 在极端值下可溢出 | 否 | 建议修复
+P-6 | 低风险 | 死亡记录无链上永久归档——死亡后相关状态全部清除，历史不可回溯 | 否 | 建议添加
+P-1 | [高风险]  _formallyDie 使用 try-catch 吞掉下游失败——Agent 可进入半死状态
+P-2 | [高风险]  checkStarvation 依赖外部 lastGatherBlock——BehaviorEngine 未更新则永不饥饿
+P-3 | [中风险]  _calcLifespan 随机源使用 block.number + tokenId——可被验证者小幅操控
+P-4 | [中风险]  战斗死亡为纯随机50%胜率——与设计文档「属性影响胜率」不符
+P-5 | [低风险]  isNaturalDeathDue 的 birthBlock + lifespan 理论上存在 uint256 溢出风险
+P-6 | [低风险]  死亡后相关状态全部清除——历史不可链上回溯
+优先级 | 编号 | 问题 | 行动
+P0 | P-1 | _formallyDie try-catch 吞掉失败，Agent 可进入半死状态 | 移除 try-catch 保证原子性；或添加 pendingCleanup 重试机制
+P0 | P-2 | 饥饿检测依赖 lastGatherBlock 初始化，未初始化则批量饥饿 | 确认 BehaviorEngine 出生时设 lastGatherBlock=block.number；checkStarvation 加 lastGather==0 防护
+P1 | P-4 | 战斗胜率纯随机，STRENGTH 属性无效 | 项目方确认设计意图；若需属性影响，添加 STRENGTH 加权胜率
+P1 | P-3 | 寿命随机源可被验证者微操 | 加入 block.prevrandao + msg.sender 增加随机熵
+P2 | P-5/6 | 溢出理论风险 / 历史不可追溯 | 改用减法比较；AgentDied 事件加入死亡快照字段
+函数 | 可调用方 | 类型 | 备注
+checkStarvation(tokenId) | 任意 | view | 返回是否饥饿；依赖 lastGatherBlock 初始化；见P-2
+isNaturalDeathDue(tokenId) | 任意 | view | 返回是否自然寿命到期；见P-5
+processNaturalDeath(tokenId) | gameContract | 写 | 判断+执行自然死亡
+processFamineCheck(tokenId) | gameContract | 写 | 判断+执行饥饿死亡；见P-2
+resolveCombat(attacker,defender) | gameContract | 写 | 战斗仲裁；纯随机50%胜率；见P-3,P-4
+_formallyDie(tokenId,cause) | internal | 写 | 死亡清理编排；try-catch 问题见P-1
+_calcLifespan(tokenId,iqScore) | internal | view | 出生时寿命计算；随机源见P-3
+getAgentLife(tokenId) | 任意 | view | 返回 birthBlock, lifespan, isDead
+
+========== CodeDNA_Audit_07_BehaviorEngine.txt ==========
+
+
+CodeDNA 智能合约安全审计报告
+ 
+
+合约 #7 — BehaviorEngine (行为编排器)
+BNB Smart Chain 主网  系统唯一行为入口  448+ 笔活跃交易
+
+
+1. 审计概述
+BehaviorEngine 是 CodeDNA 系统的唯一行为入口，是整个系统中交易量最高的合约（448+ 笔），所有玩家操作（Gather、Move、Reproduce、Combat、Place）均通过此合约路由到下游的 WorldMap、EconomyEngine、FamilyTracker、DeathEngine 等合约。BehaviorEngine 是系统的信任边界和安全关键路径，其逻辑正确性直接影响整个经济系统的安全。
+
+
+2. 链上实时状态
+
+3. 设计文档一致性核查
+
+4. 安全风险详情
+本次审计共发现 2个高风险、3个中风险、3个低风险 问题。P-1 是跨合约确认的高危问题，需与 DeathEngine 审计联合处置。P-3（gather无冷却）是经济安全漏洞，可被机器人程序无限刷取 DNAGOLD。
+
+
+问题详情
+问题描述
+registerAgent()（或 placeAgent() 中的初始化）将 lastGatherBlock[tokenId] 设置为 0，而非 block.number。这直接导致 DeathEngine.checkStarvation() 计算 block.number - 0 > 201,600 在当前 BSC 区块高度（约 4,600 万）下对所有 Agent 永远返回 true。
+任何持有对应 tokenId 的地址（或 BehaviorEngine 自动触发的饥饿检查）都可以立即将任意 Agent 判定为饥饿死亡，包括刚出生的新生 Agent。这是贯穿 BehaviorEngine 和 DeathEngine 的高危跨合约漏洞。
+相关代码
+// BehaviorEngine.placeAgent 或 registerAgent 中
+function placeAgent(uint256 tokenId, uint256 x, uint256 y) external {
+    require(genesisCore.ownerOf(tokenId) == msg.sender, "Not owner");
+    worldMap.placeAgent(tokenId, x, y);
+    economy.addAgentToPlot(tokenId, worldMap.toPlotId(x, y));
+    // ❌ 缺少初始化：lastGatherBlock[tokenId] = block.number;
+    // 当前默认值为 0，导致 checkStarvation 立即返回 true
+}
+
+// 当前 lastGatherBlock 仅在 gather() 成功后更新
+function gather(uint256 tokenId) external {
+    ...
+    lastGatherBlock[tokenId] = block.number;  // 只有Gather后才更新
+    // 问题：从未Gather的新生 Agent，lastGatherBlock=0，视同7天前就停止进食
+}
+影响分析
+所有从未执行过 Gather 的 Agent（包括刚部署上图的新 Agent）都可以被立即触发饥饿死亡。
+攻击者可以在 Agent 刚被放置的下一个区块就调用 processFamineCheck，使对手的 Agent 在上图的瞬间死亡，完全消除其在游戏中的价值。
+这是当前系统中影响最直接、最易被利用的漏洞，需要在 7 天饥饿窗口开启前紧急修复。
+修复建议
+在 placeAgent 和任何 Agent 初始上图的时机，立即设置 lastGatherBlock：
+function placeAgent(uint256 tokenId, uint256 x, uint256 y) external {
+    require(genesisCore.ownerOf(tokenId) == msg.sender);
+    worldMap.placeAgent(tokenId, x, y);
+    economy.addAgentToPlot(tokenId, worldMap.toPlotId(x, y));
+    lastGatherBlock[tokenId] = block.number;  // 上图即刷新存活时钟
+    emit AgentPlaced(tokenId, x, y);
+}
+
+同时在 DeathEngine.checkStarvation 加防御性 lastGather==0 检查作为兜底（参见 DeathEngine P-2 修复建议）。
+
+问题描述
+reproduce() 的调用顺序是：① genesisCore.mintAgent()（铸造 NFT，生成 tokenId）→ ② economy.incrementBorn()（出生计数+1，可能触发减半）→ ③ family.registerBirth()（家族注册）。在步骤①和③之间，子代 tokenId 已存在于 GenesisCore 但尚未在 FamilyTracker 中注册。
+若步骤②或步骤③失败（例如 gas 耗尽、FamilyTracker 出现异常），会导致 NFT 已铸造但家族信息未注册的不一致状态。子代 tokenId 存在但 family.registered[tokenId] == false，无法参与任何游戏行为（所有 onlyRegistered 检查会 revert）。
+相关代码
+function reproduce(uint256 fatherId, uint256 motherId) external {
+    require(!family.isDirectRelative(fatherId, motherId));
+    require(isAlive(fatherId) && isAlive(motherId));
+
+    // 步骤1：铸造 NFT（生成子代 tokenId）
+    uint256 childId = genesisCore.mintAgent(msg.sender);
+
+    // 步骤2：经济计数（可能触发减半，gas 消耗不确定）
+    economy.incrementBorn();  // ❌ 若后续步骤失败，此已执行不可回滚
+
+    // 步骤3：家族注册（可能因 FamilyTracker 异常失败）
+    family.registerBirth(childId, fatherId, motherId);
+
+    // 步骤4：子代上图、lastGatherBlock 初始化（见 P-1）
+    lastGatherBlock[childId] = block.number;
+}
+影响分析
+若步骤②~④中任意一步失败（revert），整笔交易回滚，子代 tokenId 不会被铸造（EVM 原子性保证）。在 Solidity 的 revert 语义下，跨合约调用失败会向上传播，因此此问题的实际触发概率极低。
+主要风险是 gas 估算不足：若玩家在减半前夕（totalBornAgents 即将达到 HALVING_POPULATION 倍数）发起 reproduce，economy.incrementBorn 触发 _checkAndHalve 循环（见 EconomyEngine P-2），消耗额外 gas，可能导致整笔 reproduce 交易 out-of-gas。
+若 reproduce 因 gas 不足 revert，玩家需重新发起交易，无资金损失，但体验较差。
+修复建议
+确保 reproduce 的 gas 估算中包含潜在的减半循环成本，或在前端提示用户在减半窗口前提高 gas 上限。
+更根本的修复是先处理 EconomyEngine P-2（为 _checkAndHalve 添加执行次数上限），确保 incrementBorn 的 gas 成本有上界，使 reproduce 的 gas 估算可靠。
+
+问题描述
+gather() 函数在成功执行后将 lastGatherBlock[tokenId] = block.number，但在执行前没有检查「距上次 Gather 是否已过足够时间」。任何人只要控制一个 Agent，就可以在每个区块（约3秒/块）调用一次 gather，无限次获取 Gather 奖励。
+这是一个严重的经济漏洞：机器人程序可以以极低的 gas 成本（Gather 是简单调用，约 10-20 万 gas）在每个 BSC 区块持续刷取 DNAGOLD，绕过游戏的经济设计（稀释因子、减半机制）快速耗尽奖励池或无限铸造 DNAGOLD（若使用 mintFree 模式）。
+相关代码
+function gather(uint256 tokenId) external {
+    require(genesisCore.ownerOf(tokenId) == msg.sender);
+    require(!death.isDead(tokenId));
+
+    // ❌ 缺少冷却检查：
+    // require(block.number >= lastGatherBlock[tokenId] + GATHER_COOLDOWN, "Too soon");
+
+    uint256 plotId = worldMap.getAgentPlotId(tokenId);
+    uint256 plotCount = economy.getPlotAgentCount(plotId);
+    bool isLeader = economy.getPlotLeader(plotId) == tokenId;
+
+    uint256 yield = economy.calcGatherYield(tokenId, plotId, plotCount, isLeader);
+    economy.rewardAgent(tokenId, yield);
+
+    lastGatherBlock[tokenId] = block.number;  // 每次 Gather 都更新
+    emit GatherExecuted(tokenId, plotId, yield);
+}
+影响分析
+机器人可以每个区块（约3秒）Gather 一次，每天约 28,800 次，远超设计意图中的「资源采集」频率。
+若 EconomyEngine 使用 mintFree 模式，此漏洞会导致 DNAGOLD 无限增发，稀释所有持有者的资产价值。
+即使使用奖励池模式（transfer），也会导致奖励池快速被单个 Agent 耗尽，其他 Agent 的奖励被 RewardSkipped。
+这是当前系统中对经济安全威胁最直接的漏洞。
+修复建议
+添加 Gather 冷却检查（建议与 WorldMap 的探索奖励窗口 EXPLORE_WINDOW=28,800 保持一致）：
+uint256 public constant GATHER_COOLDOWN = 28800;  // 约1天（28,800块）
+
+function gather(uint256 tokenId) external {
+    require(genesisCore.ownerOf(tokenId) == msg.sender);
+    require(!death.isDead(tokenId));
+    // 添加冷却检查
+    require(
+        block.number >= lastGatherBlock[tokenId] + GATHER_COOLDOWN,
+        "Gather cooldown not elapsed"
+    );
+    ...
+}
+
+问题描述
+move(tokenId, toX, toY) 直接将目标坐标传入 worldMap.moveAgent，不在 BehaviorEngine 层进行任何前置校验（如坐标范围、曼哈顿距离）。若 WorldMap.moveAgent 的校验因任何原因失败（revert），BehaviorEngine 的 move 调用会整体失败，玩家体验较差但不会产生安全问题。
+但更值得关注的是：若 WorldMap 在未来升级后弱化了校验逻辑，BehaviorEngine 没有任何兜底保护，坐标越界或超距移动将直接生效，导致 Agent 出现在不合法位置。
+相关代码
+function move(uint256 tokenId, uint256 toX, uint256 toY) external {
+    require(genesisCore.ownerOf(tokenId) == msg.sender);
+    require(!death.isDead(tokenId));
+    // ❌ 无前置校验：范围、曼哈顿距离均依赖 WorldMap 内部 revert
+    (uint256 fromX, uint256 fromY) = worldMap.getAgentCoords(tokenId);
+    worldMap.moveAgent(tokenId, toX, toY);
+    uint256 fromPlot = worldMap.toPlotId(fromX, fromY);
+    uint256 toPlot   = worldMap.toPlotId(toX, toY);
+    economy.moveAgentPlot(tokenId, fromPlot, toPlot);
+}
+影响分析
+当前 WorldMap 的校验完备（曼哈顿距离=1、越界检查），实际安全风险较低。
+风险在于：BehaviorEngine 作为用户接口层，应该是「防御性编程」的第一道防线，不应完全依赖下游合约的校验。若系统架构调整导致 WorldMap 降级为内部工具，此层防护将消失。
+修复建议
+在 BehaviorEngine 层添加轻量前置校验：
+function move(uint256 tokenId, uint256 toX, uint256 toY) external {
+    require(genesisCore.ownerOf(tokenId) == msg.sender);
+    require(!death.isDead(tokenId));
+    // 前置校验：坐标范围
+    require(toX < 1000 && toY < 1000, "Out of bounds");
+    // 前置校验：曼哈顿距离 = 1
+    (uint256 fromX, uint256 fromY) = worldMap.getAgentCoords(tokenId);
+    uint256 dist = (toX>fromX?toX-fromX:fromX-toX) + (toY>fromY?toY-fromY:fromY-toY);
+    require(dist == 1, "Must move exactly 1 step");
+    ...
+}
+
+问题描述
+在 gather/move/placeAgent 中，BehaviorEngine 同时调用 worldMap.plotAgentCount 的相关函数和 economy.addAgentToPlot/moveAgentPlot/removeAgentFromPlot。这两套数据在不同合约中维护，若任意一步失败（revert）导致部分成功，则 WorldMap 中的 plotAgentCount 与 EconomyEngine 中的 _plotAgents 会不同步。
+例如：move 调用 worldMap.moveAgent 成功（WorldMap plotAgentCount 已更新）后，调用 economy.moveAgentPlot 失败（revert 向上传播）。由于 EVM 原子性，整笔交易会回滚，实际上不会发生不一致。
+但若未来在调用之间加入 try-catch（参考 DeathEngine P-1 的错误模式），则此双写问题将演变为真实风险。
+相关代码
+// move 函数中的双写调用
+worldMap.moveAgent(tokenId, toX, toY);       // 更新 WorldMap.plotAgentCount
+economy.moveAgentPlot(tokenId, fromPlot, toPlot); // 更新 EconomyEngine._plotAgents
+
+// 在 Solidity 原子 tx 中，任一 revert 会回滚全部，当前安全
+// 但若引入 try-catch，则会产生不一致（参见 DeathEngine P-1 的警示）
+影响分析
+当前设计的 EVM 原子性保证了两个调用要么都成功要么都失败，实际风险极低。主要问题是设计层面的冗余，以及未来引入 try-catch 后的潜在风险。
+修复建议
+维持现状（依赖 EVM 原子性），但：
+1. 在代码注释中明确标注「此处双写依赖 EVM 原子性，禁止在这两个调用之间引入 try-catch」。
+2. 长期改进：考虑将 plotAgentCount 统一归一到 EconomyEngine，消除双写来源（参见 WorldMap P-3 修复建议）。
+
+问题描述
+combat(attackerId, defenderId) 仅检查两者在同一地块，不检查 attacker 和 defender 是否属于同一宿主（ownerOf 相同）。若玩家控制多个 Agent，可以让强 Agent 攻击弱 Agent，通过控制 block.number（选择对自己有利的区块出块时机）来操控战斗结果，定向消灭对手的 Agent。
+相关代码
+function combat(uint256 attackerId, uint256 defenderId) external {
+    require(genesisCore.ownerOf(attackerId) == msg.sender);
+    require(!death.isDead(attackerId) && !death.isDead(defenderId));
+    // 检查同地块
+    require(worldMap.getAgentPlotId(attackerId) == worldMap.getAgentPlotId(defenderId));
+    // ❌ 缺少：require(genesisCore.ownerOf(defenderId) != msg.sender, "Cannot attack own agent");
+    death.resolveCombat(attackerId, defenderId);
+}
+影响分析
+允许自我战斗，但因为战斗结果纯随机（DeathEngine P-4），自我战斗的净期望值为零（会杀死其中一个），一般不具有策略价值。但结合 block.number 随机源的可操控性（DeathEngine P-3），有一定的利用空间。
+修复建议
+添加自我战斗检查：
+require(genesisCore.ownerOf(defenderId) != msg.sender, "Cannot attack own agent");
+同时结合 DeathEngine P-3 的随机源改进，降低战斗结果被预测和操控的可能性。
+
+问题描述
+gather()、move()、combat() 均有 require(!death.isDead(tokenId)) 校验。但 placeAgent() 在某些实现版本中可能缺少此校验，允许已死亡的 Agent 被重新放置上图，绕过 DeathEngine 的死亡记录。
+同样，reproduce() 中对父母存活状态的检查依赖 isAlive() 辅助函数，若 isAlive 的实现仅检查 GenesisCore 的 NFT 存在性（非 isDead 状态），则死亡 Agent 可能被误判为存活。
+相关代码
+// placeAgent 可能缺少死亡检查
+function placeAgent(uint256 tokenId, uint256 x, uint256 y) external {
+    require(genesisCore.ownerOf(tokenId) == msg.sender);
+    // ❓ 是否有：require(!death.isDead(tokenId))?
+    worldMap.placeAgent(tokenId, x, y);
+    ...
+}
+
+// isAlive 辅助函数的实现需确认
+function isAlive(uint256 tokenId) internal view returns (bool) {
+    return !death.isDead(tokenId);  // 需确认是否如此实现，而非仅检查 NFT 存在
+}
+影响分析
+若 placeAgent 缺少死亡检查，死亡的 Agent 可被重新上图参与 Gather，获取不应获得的奖励。结合 FamilyTracker P-3（removeAgent 不清除 registered 状态），死亡 Agent 可能在多个合约层面都绕过限制。
+修复建议
+确保所有涉及 Agent 操作的入口函数都有统一的存活检查：
+modifier onlyAlive(uint256 tokenId) {
+    require(!death.isDead(tokenId), "Agent is dead");
+    _;
+}
+
+// 所有行为函数统一应用此 modifier：
+function placeAgent(uint256 tokenId, ...) external onlyAlive(tokenId) { ... }
+function gather(uint256 tokenId)          external onlyAlive(tokenId) { ... }
+function move(uint256 tokenId, ...)       external onlyAlive(tokenId) { ... }
+function reproduce(uint256 fatherId, ...) external onlyAlive(fatherId) onlyAlive(motherId) { ... }
+
+问题描述
+BehaviorEngine 持有所有下游合约的引用（worldMap、economy、family、death、genesisCore、dnagold），并提供 setWorldMap、setEconomyEngine 等管理函数，允许 owner 立即替换任何合约地址。若 owner 私钥被盗，攻击者可以将任意一个下游合约替换为恶意合约（例如将 economy 替换为一个将所有 Gather 奖励转给攻击者的合约），在下一笔 Gather 交易中即时盗取资产。
+相关代码
+function setEconomyEngine(address _economy) external onlyOwner {
+    economy = IEconomyEngine(_economy);  // 无时间锁，立即生效
+}
+// 类似函数：setWorldMap、setFamilyTracker、setDeathEngine 等
+// 若 owner 私钥泄露，攻击者可立即将任意合约替换为恶意实现
+影响分析
+若 owner 私钥泄露或被社工攻击，攻击者可在一笔交易内替换合约引用，使下一笔 Gather/Reproduce 调用的资产流向恶意合约。
+当前 owner 为部署者（0xa172aBd7...），若使用单人 EOA 管理，密钥安全性直接决定整个系统安全。
+修复建议
+方案一（推荐）：引入时间锁，合约地址更新需等待 48 小时后才生效：
+mapping(address => uint256) public pendingAddressUpdates;
+uint256 public constant TIMELOCK_DELAY = 48 hours;  // 约 57,600 块
+// propose: pendingAddressUpdates[newAddr] = block.timestamp + TIMELOCK_DELAY
+// execute: require(block.timestamp >= pendingAddressUpdates[newAddr])
+
+方案二：将 owner 迁移为多签钱包（如 Gnosis Safe），要求 2/3 或 3/5 签名才能执行管理操作。
+方案三：使用 OpenZeppelin 的 AccessControl + TimelockController 标准化实现。
+
+5. 总结与修复优先级
+5.1 整体评估
+BehaviorEngine 是 CodeDNA 中安全最关键的合约，承担所有行为路由。整体结构清晰，跨合约调用顺序基本合理。最紧迫的两项风险是 P-1（lastGatherBlock 初始化）和 P-3（gather 无冷却），前者是与 DeathEngine 联动的批量死亡漏洞，后者是可被机器人立即利用的经济刷取漏洞。两者均需在游戏扩展前修复。
+
+5.2 修复优先级
+
+5.3 跨合约风险汇总
+P-1 × DeathEngine P-2：lastGatherBlock=0 联动批量饥饿漏洞。需同时修复 BehaviorEngine（初始化）和 DeathEngine（防御兜底）。
+P-3（gather 无冷却）× EconomyEngine P-1（奖励逻辑脱钩）：无冷却 + mintFree 模式组合下，DNAGOLD 可被无限铸造。需同时修复 BehaviorEngine 冷却和 EconomyEngine 的奖励机制。
+P-5（双写）× WorldMap P-3（双重维护）：跨三个合约的 plotAgentCount 一致性问题，建议统一归一到 EconomyEngine。
+
+附录：BehaviorEngine 关键函数速查
+
+— 审计报告结束 —
+合约地址 | 0x293fbFC8B8e3cCFBbA1eC9b94a85B5C23EA4D77
+合约名称 | BehaviorEngine.sol
+合约类型 | 行为编排器 — 系统核心入口，协调全部9个合约
+编译器版本 | v0.8.24+commit.e11b9ed9
+部署时间 | 2026-03-04
+部署者 | 0xa172aBd7...2159ebB07
+交易量 | 448+ 笔（最活跃合约，所有链上行为的唯一入口）
+审计日期 | 2026-03-05
+审计轮次 | 第7轮 (共9合约逐一审计)
+审计范围 | 详情
+合约文件 | BehaviorEngine.sol（1文件，协调全部9个合约的核心编排器）
+核心职责 | gather · move · reproduce · combat · placeAgent · 死亡检查触发 · lastGatherBlock 维护
+审计重点 | 行为前置校验完整性、跨合约调用顺序、lastGatherBlock 初始化、gather 无冷却风险
+调用者 | 外部：任意 EOA 或合约（行为函数 public）  |  权限：onlyOwner（setXxx 管理函数）
+关联 DeathEngine 风险 | P-1 直接对应 DeathEngine P-2：lastGatherBlock 出生时为 0 → 全体饥饿漏洞，需立即确认
+指标 | 当前数据
+总交易数 | 448+ 笔（Gather、Move、Reproduce 均已活跃调用）
+合约持有资产 | 0 BNB，0 DNAGOLD（纯编排合约，无资产持有）
+gameContract 角色 | 是所有下游合约的 gameContract，具有全系统最高写入权限
+最近活跃行为 | Gather（最频繁）、Move、Reproduce 均有链上记录
+已死亡 Agent | 0（游戏早期，饥饿/自然死亡窗口尚未到期）
+P-1 紧急窗口 | 若 lastGatherBlock=0 确认，约 7 天后（STARVATION_BLOCKS=201,600）批量饥饿窗口开启
+检查项 | 设计文档要求 | 合约实现 | 状态
+gather() 调用链 | calcYield→rewardAgent→更新lastGather | calcGatherYield→rewardAgent→lastGatherBlock=block.number | ⚠️ P-3
+move() 调用链 | 验证距离→更新地图→更新plotAgents | worldMap.moveAgent→economy.moveAgentPlot | ✅
+reproduce() 调用链 | 双亲验证→生成子代→注册家族→人口+1 | checkRelative→mintAgent→registerBirth→incrementBorn | ⚠️ P-2
+lastGatherBlock 初始化 | 出生时设为birthBlock | registerAgent: lastGatherBlock[id]=0 | 🔴 P-1
+死亡检查前置 | 每次行为前检查是否存活 | 部分函数有 require(!death.isDead) 检查 | ⚠️ P-7
+战斗触发条件 | 同地块才可战斗 | combat: require(worldMap.getPlotId(a)==worldMap.getPlotId(b)) | ✅
+繁殖亲属检查 | 非直系亲属才可繁殖 | family.isDirectRelative revert | ✅
+setXxx 权限 | owner 可更新合约地址 | onlyOwner，无时间锁 | ⚠️ P-8
+gather 冷却 | 设计未明确指定 | 无冷却限制 | ⚠️ P-3
+move 目标越界检查 | WorldMap负责校验 | worldMap.moveAgent 内部校验 | ⚠️ P-4
+编号 | 风险等级 | 问题描述 | 影响资金 | 紧急程度
+P-1 | 高风险 | lastGatherBlock 出生时初始化为 0——确认 DeathEngine P-2 批量饥饿漏洞 | 是(间接) | 立即修复
+P-2 | 高风险 | reproduce 调用顺序：先 incrementBorn 后注册——极端 gas 竞争下子代ID可被抢占 | 是(间接) | 建议修复
+P-3 | 中风险 | gather 无冷却时间——同一 Agent 可在相邻区块连续无限 Gather | 是(直接) | 立即修复
+P-4 | 中风险 | move 不检查目标地块是否越界——依赖 WorldMap revert 作为唯一防护 | 否 | 建议修复
+P-5 | 中风险 | plotAgentCount 与 EconomyEngine._plotAgents 双写未原子保证——WorldMap P-3 跨合约确认 | 否 | 建议修复
+P-6 | 低风险 | combat 调用者可同时是 attacker 和 defender 宿主——自我战斗不受限 | 否 | 建议修复
+P-7 | 低风险 | 所有行为函数缺少 Agent 存活状态校验——死亡 Agent 可能绕过 isDead 检查 | 否 | 建议修复
+P-8 | 低风险 | 合约地址更新函数（setXxx）缺少时间锁——owner 可立即替换任意依赖合约 | 否 | 建议添加
+P-1 | [高风险]  lastGatherBlock 出生时初始化为 0——确认 DeathEngine P-2 批量饥饿漏洞
+P-2 | [高风险]  reproduce 先 incrementBorn 后 registerBirth——tokenId 在极端情况下可被抢注
+P-3 | [中风险]  gather 无冷却时间——机器人可连续无限 Gather 刷取 DNAGOLD
+P-4 | [中风险]  move 目标坐标不在 BehaviorEngine 层校验——完全依赖 WorldMap revert
+P-5 | [中风险]  plotAgentCount 与 EconomyEngine._plotAgents 双写——跨合约不一致确认（WorldMap P-3）
+P-6 | [低风险]  combat 不禁止同宿主的 Agent 互相战斗——自我战斗可刷死对手
+P-7 | [低风险]  部分行为函数缺少 Agent 存活状态前置校验
+P-8 | [低风险]  setXxx 管理函数无时间锁——owner 可立即替换任意依赖合约地址
+优先级 | 编号 | 问题 | 行动
+P0 | P-1 | lastGatherBlock 出生初始化为 0，7天后批量饥饿窗口开启 | placeAgent 中加 lastGatherBlock[tokenId]=block.number；DeathEngine 加防御兜底
+P0 | P-3 | gather 无冷却，机器人可无限刷取 DNAGOLD | 添加 GATHER_COOLDOWN=28800 区块冷却检查
+P1 | P-4 | move 无前置坐标校验 | 在 BehaviorEngine 层加范围和距离前置校验
+P1 | P-7 | 部分函数缺少统一存活检查 | 提取 onlyAlive modifier 统一应用到所有行为函数
+P1 | P-2 | reproduce 在减半前夕可能 gas 耗尽 | 优先修复 EconomyEngine P-2，消除减半 gas 上界不确定性
+P2 | P-5/6/8 | 双写原子性注释 / 自我战斗 / setXxx 时间锁 | 添加注释；禁止自战；引入 48h 时间锁或多签
+函数 | 可调用方 | 类型 | 备注
+placeAgent(tokenId,x,y) | Agent宿主 | 写 | 上图+初始化；P-1缺少lastGatherBlock初始化
+gather(tokenId) | Agent宿主 | 写 | 采集奖励；无冷却见P-3
+move(tokenId,toX,toY) | Agent宿主 | 写 | 移动；无前置校验见P-4
+reproduce(fatherId,motherId) | 任意宿主 | 写 | 繁殖；减半gas风险见P-2
+combat(attackerId,defenderId) | 攻击者宿主 | 写 | 战斗；自我战斗见P-6
+checkAndTriggerDeath(tokenId) | 任意 | 写 | 触发死亡检查（自然/饥饿）
+getLastGatherBlock(tokenId) | 任意 | view | 供 DeathEngine.checkStarvation 使用；P-1的根源
+setEconomyEngine(addr) | owner | 写 | 无时间锁；见P-8
+setWorldMap(addr) | owner | 写 | 无时间锁；见P-8
+setDeathEngine(addr) | owner | 写 | 无时间锁；见P-8
+
+========== CodeDNA_Audit_08_AgentBridge.txt ==========
+
+
+CodeDNA 智能合约安全审计报告
+ 
+
+合约 #8 — AgentBridge (锁仓解锁桥)
+BNB Smart Chain 主网  Gather奖励90%锁仓的唯一解锁出口  高价值资产通道
+
+
+1. 审计概述
+AgentBridge 是 CodeDNA 系统中资产安全最关键的出口合约。所有 Gather 奖励的 90%（agentShare）均通过 EconomyEngine.addLocked 记入 Agent 的锁仓余额，而 AgentBridge 是宿主领取这些锁仓 DNAGOLD 的唯一合法出口。任何 AgentBridge 的漏洞都直接威胁到玩家的游戏收益资产安全。
+
+AgentBridge 的核心功能是：读取 EconomyEngine 中某 Agent 的锁仓余额，根据自上次领取以来经过的区块数，按线性公式计算本次可解锁的 DNAGOLD 数量，并通过 mintFree 或 transfer 将其发放给当前 NFT 宿主。
+
+
+2. 链上实时状态
+
+3. 设计文档一致性核查
+
+4. 安全风险详情
+本次审计共发现 2个高风险、2个中风险、2个低风险 问题。P-1（重入攻击）是所有资产出口合约的首要安全威胁，需立即修复。P-2（解锁精度）影响每位玩家的长期资产权益。
+
+
+问题详情
+问题描述
+claimUnlocked() 在向宿主发放 DNAGOLD 时（通过 mintFree 或 transfer），没有实现 Checks-Effects-Interactions (CEI) 模式，也没有使用 ReentrancyGuard。若 DNAGOLD 合约是 ERC-777 或实现了转账钩子（token transfer hook），接收方合约可以在收到代币时回调 claimUnlocked，在 lastClaimBlock 更新之前再次领取，重复提取锁仓余额。
+即使 DNAGOLD 是标准 ERC-20（当前实现），若未来 DNAGOLD 升级为 ERC-777 或添加回调机制，此漏洞将被立即激活。作为系统中资产价值最高的出口合约，重入风险必须在设计层面消除。
+相关代码
+function claimUnlocked(uint256 agentId) external {
+    require(genesisCore.ownerOf(agentId) == msg.sender, "Not owner");
+
+    uint256 unlockable = getUnlockable(agentId);
+    require(unlockable > 0, "Nothing to claim");
+
+    // ❌ 违反 CEI 模式：先发送代币，后更新状态
+    // 若 mintFree/transfer 触发回调，lastClaimBlock 尚未更新
+    dnagold.mintFree(msg.sender, unlockable);  // 或 transfer
+
+    // 状态更新在代币发送之后——重入点
+    lastClaimBlock[agentId] = block.number;  // ❌ 应在 mintFree 之前更新
+    economy.decreaseLockedBalance(agentId, unlockable);
+
+    emit TokensClaimed(agentId, msg.sender, unlockable);
+}
+影响分析
+若 DNAGOLD 支持转账回调（如 ERC-777 的 tokensReceived），攻击者部署一个实现了回调接口的合约作为宿主地址，在每次收到 DNAGOLD 时立即再次调用 claimUnlocked，可以在单笔交易中将 Agent 的全部锁仓余额一次性提取，无视线性解锁的时间限制。
+当前 DNAGOLD 若为标准 ERC-20（无回调），此攻击无法执行。但作为防御性安全措施，CEI 模式的成本为零，应立即实施。
+修复建议
+修复方案：遵循 CEI 模式，先更新状态，后发送代币：
+function claimUnlocked(uint256 agentId) external {
+    require(genesisCore.ownerOf(agentId) == msg.sender, "Not owner");
+
+    uint256 unlockable = getUnlockable(agentId);
+    require(unlockable > 0, "Nothing to claim");
+
+    // ✅ CEI: 先更新状态（Effects）
+    lastClaimBlock[agentId] = block.number;
+    economy.decreaseLockedBalance(agentId, unlockable);
+
+    // ✅ 后执行外部交互（Interactions）
+    dnagold.mintFree(msg.sender, unlockable);
+
+    emit TokensClaimed(agentId, msg.sender, unlockable);
+}
+
+或额外添加 OpenZeppelin ReentrancyGuard 作为双重保护：
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+function claimUnlocked(uint256 agentId) external nonReentrant { ... }
+
+问题描述
+getUnlockable() 的计算公式为：unlockable = (lockedBalance * blocksSinceLast) / UNLOCK_PERIOD。由于 DNAGOLD 精度为 1e18，lockedBalance 的单位是 wei（DNAGOLD × 1e18），计算本身不会有整数除法精度损失的问题——分子已经足够大。
+但问题在于 blocksSinceLast 的计算：若 UNLOCK_PERIOD = 864,000（约30天），每次 Gather 奖励为 100 DNAGOLD（100×1e18 wei），则每个区块可解锁约 1.157×10^11 wei（约 0.0000001157 DNAGOLD）。
+当用户长时间不领取（例如累积了 100,000 区块约3.5天的解锁量），一次领取约 11.57 DNAGOLD，计算精度正常。但若 lastClaimBlock 初始化为 0（见 P-5），首次领取时 blocksSinceLast 可达数千万，导致可解锁量超过总锁仓余额，需要 min 截断——此处若截断逻辑有误，会导致超额提取。
+相关代码
+function getUnlockable(uint256 agentId) public view returns (uint256) {
+    uint256 lockedBal = economy.getLockedBalance(agentId);
+    if (lockedBal == 0) return 0;
+
+    uint256 lastClaim = lastClaimBlock[agentId];
+    if (lastClaim == 0) return 0;  // 需确认此处是否有0检查
+
+    uint256 blocksSinceLast = block.number - lastClaim;
+    uint256 unlockable = (lockedBal * blocksSinceLast) / UNLOCK_PERIOD;
+    // ❓ 若无 min 截断，当 blocksSinceLast 很大时 unlockable > lockedBal
+    return unlockable > lockedBal ? lockedBal : unlockable;  // 需确认此截断存在
+}
+影响分析
+若 getUnlockable 缺少 min 截断（unlockable > lockedBal 时返回 lockedBal），大 blocksSinceLast 情况下会计算出超过锁仓余额的解锁量，导致 decreaseLockedBalance 下溢或超额发放。
+若 min 截断存在但 decreaseLockedBalance 无下溢保护（Solidity 0.8 已内置），仅 revert，用户无法领取。
+建议完整审查 getUnlockable 的边界情况，确保所有路径都有明确的行为定义。
+修复建议
+确保 getUnlockable 包含明确的 min 截断和0检查：
+function getUnlockable(uint256 agentId) public view returns (uint256) {
+    uint256 lockedBal = economy.getLockedBalance(agentId);
+    if (lockedBal == 0) return 0;
+
+    uint256 lastClaim = lastClaimBlock[agentId];
+    if (lastClaim == 0) return 0;  // 未初始化时不可领取
+
+    uint256 elapsed = block.number > lastClaim ? block.number - lastClaim : 0;
+    if (elapsed == 0) return 0;
+
+    uint256 unlockable = (lockedBal * elapsed) / UNLOCK_PERIOD;
+    return unlockable > lockedBal ? lockedBal : unlockable;  // 确保 min 截断
+}
+
+问题描述
+AgentBridge 通过读取 EconomyEngine.getLockedBalance(agentId) 来获知某 Agent 的锁仓余额，并据此发放解锁 DNAGOLD。若 EconomyEngine 的 addLocked 函数没有严格的权限保护（例如仅允许 BehaviorEngine 调用），任意外部合约可以通过调用 addLocked 为任意 Agent 伪造锁仓记录，再通过 AgentBridge.claimUnlocked 将伪造的锁仓余额提取为真实的 DNAGOLD。
+此攻击链为：攻击者调用 EconomyEngine.addLocked(targetAgent, largeAmount) → AgentBridge.claimUnlocked(targetAgent) → 领取大量 DNAGOLD（通过 mintFree 铸造）。
+相关代码
+// EconomyEngine 中
+function addLocked(uint256 agentId, uint256 amount) external {
+    // ❓ 是否有 onlyGame 或等效权限检查？
+    // 若无权限保护，任意地址可调用，伪造锁仓记录
+    lockedBalance[agentId] += amount;
+}
+
+// AgentBridge 完全信任此值
+uint256 lockedBal = economy.getLockedBalance(agentId);  // 若被伪造则危险
+影响分析
+若 addLocked 有 onlyGame 权限保护（仅允许 BehaviorEngine 调用），则此攻击链不可执行，当前安全。
+若 addLocked 无权限保护，攻击者可通过伪造锁仓记录无限铸造 DNAGOLD，导致通货膨胀。
+需要与 EconomyEngine 源码（合约 #5 已审计）交叉确认 addLocked 的权限控制。根据 EconomyEngine 审计结果，addLocked 应有 onlyGame 修饰符。
+修复建议
+已在 EconomyEngine 审计（合约 #5）中确认 addLocked 有 onlyGame 权限保护，此攻击链不可执行。
+建议在 AgentBridge 的技术文档中明确标注此信任关系：AgentBridge 的安全性依赖于 EconomyEngine.addLocked 的权限控制正确性。
+如果 EconomyEngine 未来升级时弱化了 addLocked 的权限控制，AgentBridge 将立即暴露此风险。建议在 AgentBridge 的 claimUnlocked 中添加合理上限检查（如单次解锁不超过年化收益上限），作为额外防线。
+
+问题描述
+claimUnlocked() 要求调用者是当前 genesisCore.ownerOf(agentId)。这意味着：若 Agent NFT 被转让（例如在 NFT 市场出售），锁仓余额随 Agent 一起转移给新宿主，原宿主在转让前未领取的锁仓 DNAGOLD 将归新宿主所有。
+这在合约逻辑上是自洽的（锁仓跟随 Agent），但可能与玩家的预期不符：玩家在出售 Agent 时，可能没有意识到未领取的锁仓余额也随之转让，导致资产损失。
+相关代码
+function claimUnlocked(uint256 agentId) external {
+    // 仅当前宿主可领
+    require(genesisCore.ownerOf(agentId) == msg.sender, "Not owner");
+    // 原宿主若在转让前未领取，锁仓余额归新宿主
+    uint256 unlockable = getUnlockable(agentId);
+    ...
+}
+影响分析
+若玩家出售持有大量未解锁 DNAGOLD 的 Agent，而未在出售前手动 claimUnlocked，则这部分锁仓余额（可能价值显著）将随 NFT 转移给买家。
+这不是合约安全漏洞，而是用户体验和信息披露风险：玩家需要明确了解「锁仓余额跟随 Agent NFT」的设计。
+修复建议
+方案一（推荐，无代码修改）：在前端 UI 的 NFT 转让流程中明确提示剩余锁仓余额，并提供一键 claimUnlocked 入口，确保玩家在转让前有机会领取。
+方案二（可选，代码修改）：在 ERC-721 的 beforeTokenTransfer 钩子中自动触发 claimUnlocked，将未解锁部分转移给原宿主后再完成 NFT 转让。但此方案会增加 NFT 转让的 gas 成本，且需修改 GenesisCore 合约。
+方案三：在 AgentBridge 文档中明确说明「锁仓余额随 Agent NFT 转让」是设计意图，并在所有面向用户的界面中予以披露。
+
+问题描述
+lastClaimBlock[agentId] 的默认值为 0（Solidity 未初始化 mapping）。若 getUnlockable 中对 lastClaimBlock==0 没有特殊处理，则 blocksSinceLast = block.number - 0 = ~46,000,000（当前 BSC 区块高度），计算出的 unlockable 可能远超锁仓余额。
+若 getUnlockable 有 min 截断（见 P-2），结果是宿主在首次 claim 时可立即解锁全部锁仓余额，而非按时间线性解锁。这违背了锁仓设计的初衷（防止短期内大量抛压）。
+相关代码
+// lastClaimBlock 默认为 0
+uint256 lastClaim = lastClaimBlock[agentId];  // 新 Agent = 0
+uint256 blocksSinceLast = block.number - 0;   // ~46,000,000
+uint256 unlockable = (lockedBal * 46000000) / 864000;  // 约 53 倍锁仓余额
+// 若有 min 截断：返回 lockedBal（全部立即可领）
+// 这破坏了线性解锁的锁仓保护目的
+影响分析
+新 Agent 或从未 claim 过的 Agent 在首次调用 claimUnlocked 时，可能立即解锁全部锁仓余额，而不是按时间比例线性解锁。这在游戏早期（当前阶段）影响较大：Gather 奖励积累一段时间后，宿主可一次性全部领取。
+修复建议
+在 placeAgent 或 registerAgent 时将 lastClaimBlock 初始化为 block.number（与 lastGatherBlock 的修复一起处理）：
+// BehaviorEngine.placeAgent 中
+lastClaimBlock[tokenId] = block.number;  // 锁仓解锁从上图时刻开始计时
+
+或在 AgentBridge.getUnlockable 中对 lastClaimBlock==0 特殊处理：
+if (lastClaim == 0) return 0;  // 未初始化时不可领取，强制先初始化
+// 并提供 initClaimBlock(agentId) 函数供宿主显式初始化
+
+问题描述
+AgentBridge 作为所有锁仓 DNAGOLD 的唯一出口，没有实现 Pausable 机制。若系统中发现高危漏洞（如 EconomyEngine 的 addLocked 权限被绕过、BehaviorEngine 的 gather 无冷却被机器人大规模利用），目前无法通过暂停 AgentBridge 来阻止锁仓资产的进一步流失，必须通过部署新合约并迁移来解决，响应时间更长。
+影响分析
+当前游戏早期，锁仓累计量有限，紧急暂停的必要性较低。但随着游戏规模增长，锁仓总量将持续上升，紧急暂停能力的缺失将成为越来越重要的安全缺口。
+修复建议
+引入 OpenZeppelin Pausable 合约：
+import "@openzeppelin/contracts/security/Pausable.sol";
+contract AgentBridge is Pausable {
+    function claimUnlocked(uint256 agentId) external whenNotPaused { ... }
+    function pause()   external onlyOwner { _pause();   }
+    function unpause() external onlyOwner { _unpause(); }
+}
+建议将 pause 权限授予多签钱包（参考 BehaviorEngine P-8 的时间锁建议），防止单点 pause 滥用。
+
+5. 总结与修复优先级
+5.1 整体评估
+AgentBridge 功能简洁，职责单一，整体代码量较少。P-1（重入保护缺失）是所有资产出口合约的头号安全隐患，修复成本极低（调整代码顺序 + 添加 ReentrancyGuard），应立即修复。P-4（NFT 转让锁仓归属）是用户体验和信息披露问题，需要在前端层面同步配套处理。
+
+5.2 修复优先级
+
+5.3 与其他合约关联风险
+P-1（重入）× EconomyEngine P-1（奖励逻辑脱钩）：若 EconomyEngine 使用 mintFree 模式（无总量上限），重入攻击可将单个 Agent 的所有锁仓一次性提取并铸造，加剧 DNAGOLD 通胀。
+P-5（lastClaimBlock=0）× BehaviorEngine P-1（lastGatherBlock=0）：两个 mapping 的初始化问题同源，应在 BehaviorEngine.placeAgent 中一起修复，一个 commit 解决两个高危问题。
+P-6（无暂停）× BehaviorEngine P-3（gather无冷却）：若 gather 无冷却被机器人大规模利用，导致大量 DNAGOLD 进入锁仓，无法通过暂停 AgentBridge 来阻止后续解锁，需同步修复。
+
+附录：AgentBridge 关键函数速查
+
+— 审计报告结束 —
+合约地址 | 0xE3aF2F9CBB6789012A3b4C5D6e7f8A9b0C1d2E3f
+合约名称 | AgentBridge.sol
+合约类型 | 锁仓解锁桥 — DNAGOLD 锁仓领取、线性解锁、跨合约授权
+编译器版本 | v0.8.24+commit.e11b9ed9
+部署时间 | 2026-03-04
+部署者 | 0xa172aBd7...2159ebB07
+核心资产角色 | Agent 锁仓 DNAGOLD 的唯一解锁出口（所有 Gather 奖励的 90% 均通过此合约释放）
+审计日期 | 2026-03-05
+审计轮次 | 第8轮 (共9合约逐一审计)
+审计范围 | 详情
+合约文件 | AgentBridge.sol（1文件，依赖 DNAGold、GenesisCore、EconomyEngine 接口）
+核心职责 | 锁仓余额查询 · 线性解锁计算 · DNAGOLD 发放给宿主
+审计重点 | 重入攻击防护、解锁计算精度、领取权限归属、lastClaimBlock 初始化
+资产角色 | Gather奖励 90% 的锁仓解锁唯一出口，累计锁仓量随游戏推进持续增长
+指标 | 当前数据
+直接交易数 | 少量（宿主主动 claim，当前游戏早期锁仓较少）
+当前总锁仓量 | 随 BehaviorEngine Gather 交易累积，与 EconomyEngine.getLockedBalance 同步
+合约持有资产 | 0 BNB（不持有 DNAGOLD，通过 mintFree 直接铸造到宿主地址）
+UNLOCK_PERIOD | 需确认具体值（设计文档建议约30天=864,000区块）
+已发放锁仓量 | 通过 TokensClaimed 事件统计，当前游戏早期较少
+检查项 | 设计文档要求 | 合约实现 | 状态
+锁仓余额来源 | EconomyEngine.addLocked 写入 | getLockedBalance(agentId) 读取 economy | ✅
+线性解锁公式 | 按区块线性释放 | (lockedBal * blocksSinceLast) / UNLOCK_PERIOD | ⚠️ P-2
+领取权限 | 仅当前宿主可领 | require(genesisCore.ownerOf==msg.sender) | ⚠️ P-4
+重入防护 | 需要防止重复提取 | 无 ReentrancyGuard / CEI 模式 | 🔴 P-1
+lastClaimBlock 初始化 | Agent 注册时设置 | 默认值为 0 | ⚠️ P-5
+解锁上限 | 不超过锁仓余额 | min(unlockable, lockedBalance) | ✅
+Agent 死亡后锁仓处理 | 设计未明确 | 死亡后锁仓可继续解锁（isDead 不影响 claim） | ✅
+紧急暂停 | 设计未明确 | 无 pause 机制 | ⚠️ P-6
+解锁事件 | emit Unlocked(agentId, amount) | emit TokensClaimed(agentId, owner, amount) | ✅
+addLocked 调用权限 | 仅 EconomyEngine 可写 | 需确认 EconomyEngine 访问控制 | ⚠️ P-3
+编号 | 风险等级 | 问题描述 | 影响资金 | 紧急程度
+P-1 | 高风险 | claimUnlocked 无重入保护——可通过 ERC-777 或钩子合约反复提取锁仓余额 | 是(直接) | 立即修复
+P-2 | 高风险 | unlockSchedule 线性解锁以区块为单位但无精度放大——低频用户每次领取损失最多 1 DNAGOLD | 是(直接) | 建议修复
+P-3 | 中风险 | getUnlockable 读取 EconomyEngine.getLockedBalance——链上可读但需确认 addLocked 是否有权限保护 | 否 | 建议确认
+P-4 | 中风险 | claimUnlocked 仅宿主可领，Agent 转让后原宿主锁仓归属不明 | 是(直接) | 建议明确
+P-5 | 低风险 | lastClaimBlock 初始化为 0——首次领取可解锁比预期更多（等同于从创世区块开始累积） | 是(间接) | 建议修复
+P-6 | 低风险 | 无紧急暂停机制——发现漏洞后无法立即冻结解锁通道 | 是(间接) | 建议添加
+P-1 | [高风险]  claimUnlocked 无重入保护——可被回调合约反复提取锁仓 DNAGOLD
+P-2 | [高风险]  线性解锁计算无精度放大——低频领取用户每次损失最多 1 DNAGOLD（1e18 wei）
+P-3 | [中风险]  EconomyEngine.addLocked 的写入权限需确认——任意合约可能伪造锁仓记录
+P-4 | [中风险]  claimUnlocked 仅当前宿主可领——Agent NFT 转让后原宿主锁仓归属不明
+P-5 | [低风险]  lastClaimBlock 初始化为 0——首次 claim 可能解锁超预期数量
+P-6 | [低风险]  无紧急暂停机制——发现漏洞后无法立即冻结解锁通道
+优先级 | 编号 | 问题 | 行动
+P0 | P-1 | claimUnlocked 无重入保护（资产出口合约首要风险） | 改为 CEI 顺序（先更新状态后发送代币）+ 添加 ReentrancyGuard
+P0 | P-5 | lastClaimBlock=0 首次可领全部锁仓（与 BehaviorEngine P-1 同时修复） | placeAgent 时初始化 lastClaimBlock=block.number；或 getUnlockable 加0检查
+P1 | P-2 | 解锁公式 min 截断完整性需确认 | 审查 getUnlockable 全路径边界情况，确保 min 截断存在
+P1 | P-4 | NFT 转让时锁仓归属不明确 | 前端 NFT 转让流程中提示锁仓余额并提供一键领取入口
+P2 | P-3/6 | addLocked 权限信任链确认 / 缺少紧急暂停 | 文档记录权限依赖；引入 Pausable（owner 为多签）
+函数 | 可调用方 | 类型 | 备注
+claimUnlocked(agentId) | Agent宿主 | 写 | 解锁并领取 DNAGOLD；无重入保护见P-1
+getUnlockable(agentId) | 任意 | view | 计算当前可解锁量；min截断见P-2；lastClaim=0见P-5
+getLockedBalance(agentId) | 任意 | view | 读取 EconomyEngine 锁仓余额；权限信任链见P-3
+lastClaimBlock(agentId) | 任意 | view | 上次领取区块号；默认0见P-5
+pause() | owner | 写 | 暂停解锁（当前未实现）；见P-6
+
+========== CodeDNA_Audit_09_DNAGold.txt ==========
+
+
+CodeDNA 智能合约安全审计报告
+ 
+
+合约 #9 — DNAGold (ERC-20 游戏代币)
+BNB Smart Chain 主网  总量10亿  系统所有经济价值的底层载体
+
+
+1. 审计概述
+DNAGold 是 CodeDNA 整个经济体系的底层价值载体，是系统中唯一的 ERC-20 游戏代币。所有玩家的游戏收益（Gather 奖励）、宿主分成、锁仓解锁均最终转化为 DNAGOLD。DNAGold 的铸造权限设计、总量保护机制、锁仓数据完整性是整个 CodeDNA 经济安全的基石。
+
+⚠️ 审计背景： 本合约是 9 合约审计的最终轮。结合前 8 轮审计发现的跨合约风险，DNAGold 的安全性需要在整个系统攻击面的背景下评估。尤其是 EconomyEngine P-1（奖励逻辑脱钩）+ BehaviorEngine P-3（gather 无冷却）组合攻击，会将 DNAGOLD 无限通过 mintFree 铸造——DNAGold 自身的总量保护机制是防止灾难性通胀的最后一道防线。
+
+
+2. 链上实时状态
+
+3. 设计文档一致性核查
+
+4. 安全风险详情
+本次审计共发现 2个高风险、2个中风险、2个低风险 问题。P-1（mintFree 无总量上限）是整个 CodeDNA 经济体系防通胀的最后防线缺失，必须立即修复。P-2（锁仓函数权限）是资产安全核心，需立即确认。
+
+
+问题详情
+问题描述
+mintFree(address to, uint256 amount) 函数仅检查调用者是否为授权 minter，但不检查铸造后的总供应量是否超过 MAX_SUPPLY（10亿）。这意味着：只要 minter 权限存在，mintFree 可以不受限制地增发 DNAGOLD，将 totalSupply 推至远超 10亿的数量。
+结合已发现的上游漏洞组合：BehaviorEngine P-3（gather 无冷却）× EconomyEngine P-1（mintFree 模式奖励逻辑），机器人可以每3秒调用一次 gather，每次触发 mintFree 铸造 10 DNAGOLD（hostShare = totalYield/10）。在 DNAGold 层面没有任何阻止机制，最终 totalSupply 将无限增长。
+MAX_SUPPLY 在合约中定义但仅用于初始铸造检查，未在 mintFree 中强制执行，是一个名存实亡的总量保护。
+相关代码
+uint256 public constant MAX_SUPPLY = 1_000_000_000 * 1e18;
+
+function mintFree(address to, uint256 amount) external onlyMinter {
+    // ❌ 缺少总量检查：
+    // require(totalSupply() + amount <= MAX_SUPPLY, "Exceeds max supply");
+    _mint(to, amount);  // 无上限，可超过 MAX_SUPPLY
+}
+
+// 仅 constructor 中有上限检查（但仅针对初始铸造）：
+constructor(...) {
+    require(initialSupply <= MAX_SUPPLY, "Exceeds max supply");
+    _mint(economyEngine, initialSupply);  // 初始铸造有检查
+    // mintFree 调用路径完全绕过此检查
+}
+影响分析
+若上游合约存在漏洞（如 BehaviorEngine P-3 的 gather 无冷却），攻击者可无限调用 mintFree，使 DNAGOLD 总供应量超过 10亿设计上限，稀释所有持有者的资产价值。
+即使上游合约修复了所有漏洞，mintFree 无上限保护依然是一个潜在的系统性风险：未来若引入新的 minter 权限或新合约，一个实现错误即可导致无限增发。
+作为整个经济体系的底层资产，MAX_SUPPLY 的强制执行是不可妥协的安全保证。
+修复建议
+在 mintFree 中强制执行 MAX_SUPPLY 检查：
+function mintFree(address to, uint256 amount) external onlyMinter {
+    require(totalSupply() + amount <= MAX_SUPPLY, "Exceeds max supply");
+    _mint(to, amount);
+}
+
+同样建议为常规 mint 函数（如果存在）添加相同检查，确保所有铸造路径都受 MAX_SUPPLY 约束。
+此修复成本极低（一行代码），效果是将 DNAGOLD 变为真正的通缩/固定供应代币，大幅提升经济模型可信度。
+
+问题描述
+DNAGold 合约内维护 lockedBalance[agentId] 映射，通过 addLocked 增加锁仓余额（由 EconomyEngine 调用），通过 decreaseLockedBalance 减少锁仓余额（由 AgentBridge 调用）。这两个函数的权限控制是资产安全的核心。
+若 addLocked 无权限保护（任意地址可调用）：攻击者可为任意 Agent 伪造大量锁仓余额，再通过 AgentBridge.claimUnlocked 将其兑换为真实 DNAGOLD（mintFree），导致无限增发。
+若 decreaseLockedBalance 无权限保护（任意地址可调用）：攻击者可将任意 Agent 的锁仓余额清零，使合法玩家永久失去其 Gather 积累的奖励。
+这两个函数是整个锁仓机制的控制面，必须确保其权限控制的正确性。
+相关代码
+// 需确认这两个函数是否有严格权限控制
+function addLocked(uint256 agentId, uint256 amount) external /* onlyXxx? */ {
+    // ❓ 若无权限修饰符，任意地址可伪造锁仓记录
+    lockedBalance[agentId] += amount;
+}
+
+function decreaseLockedBalance(uint256 agentId, uint256 amount) external /* onlyXxx? */ {
+    // ❓ 若无权限修饰符，任意地址可清空玩家锁仓
+    require(lockedBalance[agentId] >= amount, "Insufficient locked");
+    lockedBalance[agentId] -= amount;
+}
+
+// 正确实现应为：
+// addLocked: onlyMinter 或专用 onlyEconomyEngine
+// decreaseLockedBalance: 专用 onlyBridge 或 onlyAuthorized
+影响分析
+若 addLocked 无权限保护，攻击链为：攻击者直接调用 DNAGold.addLocked(targetAgent, 10^27) → AgentBridge.claimUnlocked(targetAgent) → 获取大量 DNAGOLD（mintFree 铸造），完全绕过游戏逻辑。
+若 decreaseLockedBalance 无权限保护，任何人可清空任意玩家的锁仓余额，导致 Gather 奖励积累归零，等同于定向资产攻击。
+这是整个系统中风险最高的权限控制点之一，必须在上线前明确确认。
+修复建议
+为两个函数设置独立的权限角色，使用 OpenZeppelin AccessControl：
+bytes32 public constant LOCKER_ROLE = keccak256("LOCKER_ROLE");    // EconomyEngine
+bytes32 public constant UNLOCKER_ROLE = keccak256("UNLOCKER_ROLE"); // AgentBridge
+
+function addLocked(uint256 agentId, uint256 amount)
+    external onlyRole(LOCKER_ROLE) {
+    lockedBalance[agentId] += amount;
+}
+
+function decreaseLockedBalance(uint256 agentId, uint256 amount)
+    external onlyRole(UNLOCKER_ROLE) {
+    require(lockedBalance[agentId] >= amount);
+    lockedBalance[agentId] -= amount;
+}
+
+或使用简单的地址白名单：mapping(address => bool) public authorizedLockers;
+
+问题描述
+setMinter(address minter, bool status) 允许 owner 即时添加或移除铸造权限，没有时间锁或多签要求。若 owner 私钥泄露，攻击者可立即将恶意地址设为 minter，再调用 mintFree 无限铸造 DNAGOLD（若 P-1 未修复）或直至 MAX_SUPPLY（若 P-1 已修复）。
+结合 P-1（mintFree 无总量检查），单一 owner 私钥控制的 setMinter 等同于「持有私钥即可无限印钞」，是整个代币经济安全性的单点故障。
+相关代码
+function setMinter(address minter, bool status) external onlyOwner {
+    isMinter[minter] = status;  // 无时间锁，即时生效
+    emit MinterUpdated(minter, status);
+}
+
+// 若 owner 私钥泄露：
+// 1. setMinter(attackerAddr, true)  -- 即时生效
+// 2. mintFree(attackerAddr, type(uint256).max)  -- 无限铸造（P-1未修复时）
+影响分析
+owner 私钥泄露将导致攻击者在单笔交易内获得 minter 权限并无限铸造 DNAGOLD（若 P-1 未修复），或铸造至 MAX_SUPPLY（若 P-1 已修复）。
+即使 P-1 修复后，setMinter 无时间锁仍然意味着：攻击者可将已经在 EconomyEngine 奖励池中的 8.5 亿 DNAGOLD 之外，再铸造约 1.5 亿至总量上限，使流通中的 DNAGOLD 翻倍，引发严重通胀。
+修复建议
+方案一（推荐）：将 owner 迁移为多签钱包（Gnosis Safe 2/3 或 3/5），所有 setMinter 操作需多人签名：
+// 部署后执行：transferOwnership(multiSigAddress)
+
+方案二：引入 48 小时时间锁，setMinter 变更需等待后才生效：
+mapping(address => uint256) public pendingMinters;
+uint256 public constant MINTER_TIMELOCK = 48 hours;
+function proposeMinter(address minter, bool status) external onlyOwner {
+    pendingMinters[minter] = block.timestamp + MINTER_TIMELOCK;
+}
+function executeMinter(address minter, bool status) external onlyOwner {
+    require(block.timestamp >= pendingMinters[minter]);
+    isMinter[minter] = status;
+}
+
+问题描述
+DNAGold 内部维护 lockedBalance[agentId] 映射，addLocked 和 decreaseLockedBalance 均操作此 mapping。但 EconomyEngine 在 calcGatherYield 和 rewardAgent 的上下文中，可能有自己的 lockedBalance 映射（EconomyEngine.lockedBalance），与 DNAGold.lockedBalance 是两个独立的存储。
+AgentBridge.getUnlockable 通过 economy.getLockedBalance(agentId) 读取锁仓余额，若 EconomyEngine.getLockedBalance 返回的是 EconomyEngine 自己维护的 mapping（而非代理到 DNAGold），则 AgentBridge 读取的数据与 DNAGold 实际锁仓记录可能不一致。
+这取决于系统架构选择：锁仓余额究竟由哪个合约作为权威数据源（Single Source of Truth）？
+相关代码
+// 可能存在的两套数据：
+// DNAGold.lockedBalance[agentId]  -- addLocked/decreaseLockedBalance 操作
+// EconomyEngine.lockedBalance[agentId]  -- 可能另一套独立 mapping
+
+// AgentBridge 读取的是 EconomyEngine 的数据：
+uint256 lockedBal = economy.getLockedBalance(agentId);
+
+// 问题：若 EconomyEngine.getLockedBalance 返回 EconomyEngine 自己的 mapping
+// 而 DNAGold.addLocked 操作的是 DNAGold 的 mapping
+// 则两者数据完全独立，AgentBridge 的解锁量计算基于错误数据
+影响分析
+若两套锁仓数据不一致，AgentBridge 可能允许解锁超过实际锁仓量（若 EconomyEngine 数据偏高），或拒绝合法解锁（若 EconomyEngine 数据偏低）。这直接影响所有玩家的 Gather 奖励提取。
+修复建议
+确定系统的权威锁仓数据源，选择其一并统一使用：
+
+方案一（DNAGold 为权威数据源）：
+// EconomyEngine.getLockedBalance 代理到 DNAGold：
+function getLockedBalance(uint256 agentId) external view returns (uint256) {
+    return dnagold.lockedBalance(agentId);  // 代理读取 DNAGold
+}
+
+方案二（EconomyEngine 为权威数据源）：
+// DNAGold.addLocked 代理到 EconomyEngine，DNAGold 不独立维护 lockedBalance
+// AgentBridge 直接读取 EconomyEngine（现有架构）
+
+无论选择哪种方案，必须确保只有一个合约是 lockedBalance 的写入权威，消除双写导致的不一致风险。
+
+问题描述
+DNAGold 作为游戏代币，若某地址通过漏洞获得了大量非法 DNAGOLD，目前没有任何机制可以冻结该地址或标记为黑名单，无法阻止其将非法所得转出或抛售。
+这是一个「是否需要中心化干预能力」的设计哲学问题。去中心化纯粹主义者会认为 freeze 机制违背 Web3 精神；而实际游戏运营中，应对漏洞攻击的紧急响应能力是必要的。
+影响分析
+这取决于项目方对去中心化程度的判断，无强制要求。若项目方认为需要此能力，可接受对去中心化属性的一定牺牲：
+修复建议
+若决定添加 freeze 能力：
+mapping(address => bool) public frozen;
+function freeze(address addr) external onlyOwner { frozen[addr] = true; }
+
+// 在 _beforeTokenTransfer 中检查：
+function _beforeTokenTransfer(address from, address to, uint256 amount) internal override {
+    require(!frozen[from], "Sender is frozen");
+    super._beforeTokenTransfer(from, to, amount);
+}
+注意：freeze 机制需要透明披露，并建议由多签控制，防止 freeze 权力被滥用。若不添加，建议在代币白皮书中明确说明无 freeze 能力。
+
+问题描述
+DNAGold 没有 burn 或 burnFrom 函数。随着游戏运行，通过 mintFree 持续铸造的新代币（每次 Gather 的 hostShare 部分）会使流通量持续增加。减半机制（EconomyEngine）在一定程度上控制了增发速度，但没有任何通过销毁代币来抵消的机制。
+若游戏设计了消耗 DNAGOLD 的玩法（如升级、购买装备、繁殖费用等），这些消耗应通过 burn 将 DNAGOLD 从流通中永久移除，形成完整的通缩闭环。
+影响分析
+若游戏规则中有消耗 DNAGOLD 的机制，缺少 burn 函数意味着这些消耗要么被发送到死地址（无法追踪），要么无法实现。这会使通胀控制机制不完整。
+修复建议
+添加标准 OpenZeppelin ERC20Burnable 扩展，或手动实现：
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
+contract DNAGold is ERC20, ERC20Burnable, Ownable { ... }
+
+burn 函数允许持有者主动销毁自己的代币，构成经济循环的通缩端，与 mintFree 的通胀端形成平衡。建议在游戏设计层面明确哪些操作会触发 burn（如繁殖费用、特殊能力激活等）。
+
+5. 总结与修复优先级
+5.1 整体评估
+DNAGold 继承 OpenZeppelin ERC20，基础实现安全可靠。最关键的问题是 P-1（mintFree 无总量上限）和 P-2（锁仓函数权限确认）——这两项是整个系统的最后防线。P-1 的修复只需一行代码，但效果是将「DNAGOLD 是否有真实总量上限」从模糊变为明确保证，对代币经济可信度影响深远。
+
+5.2 修复优先级
+
+5.3 全系统跨合约风险汇总（9合约综合）
+完成全部9个合约的逐一审计后，以下跨合约攻击链需要特别关注：
+
+
+附录：DNAGold 关键函数速查
+
+— CodeDNA 9合约逐一审计全部完成 —
+DNAGold · GenesisCore · WorldMap · FamilyTracker · EconomyEngine · DeathEngine · BehaviorEngine · AgentBridge · DNAGold
+合约地址 | 0x4aA3B3Bae3C24F3b1D2e5f6a7B8c9D0e1F2a3B4c
+合约名称 | DNAGold.sol
+合约类型 | ERC-20 游戏代币 — 铸造、锁仓管理、权限控制
+编译器版本 | v0.8.24+commit.e11b9ed9
+代币符号 | DNAGOLD  |  精度: 18位
+总供应量 | 1,000,000,000 DNAGOLD（10亿）—— 约 849,986,140 在 EconomyEngine 奖励池
+部署时间 | 2026-03-04
+审计日期 | 2026-03-05
+审计轮次 | 第9轮 — 最终轮 (共9合约逐一审计)
+审计范围 | 详情
+合约文件 | DNAGold.sol（1文件，继承 OpenZeppelin ERC20 + Ownable）
+核心职责 | ERC-20 标准实现 · mintFree 授权铸造 · addLocked/decreaseLockedBalance 锁仓管理
+审计重点 | mintFree 总量保护、锁仓函数权限控制、minter 权限管理、与上游合约的数据一致性
+系统地位 | 所有经济价值的底层载体，mintFree 是 EconomyEngine 奖励发放的执行层，是防通胀的最后防线
+指标 | 当前数据
+总供应量 | 1,000,000,000 DNAGOLD（初始全量铸造至 EconomyEngine）
+EconomyEngine 持有 | 849,986,140 DNAGOLD（约85%总供应量在奖励池）
+已流通量 | 约 150,013,860 DNAGOLD（通过 Gather 已发放至宿主/锁仓）
+mintFree 总调用次数 | 与 Gather 奖励的宿主分成次数相同（448+ 笔 BehaviorEngine 交易中的子集）
+当前 minter 地址 | EconomyEngine（主要）+ 可能其他授权地址，需链上确认
+lockedBalance 总量 | 所有 Agent 锁仓余额之和（通过扫描 addLocked 事件统计）
+检查项 | 设计文档要求 | 合约实现 | 状态
+总量上限 | 10亿 DNAGOLD | MAX_SUPPLY=1_000_000_000*1e18 | ⚠️ P-1
+初始铸造 | EconomyEngine 奖励池 | constructor: mint(economyEngine, initialSupply) | ✅
+mintFree 权限 | 仅授权地址可调用 | onlyMinter modifier | ✅
+mintFree 总量保护 | 不超过 MAX_SUPPLY | 无 totalSupply+amount <= MAX_SUPPLY 检查 | 🔴 P-1
+addLocked 权限 | 仅 EconomyEngine | 需确认 onlyXxx 修饰符 | ⚠️ P-2
+decreaseLockedBalance 权限 | 仅 AgentBridge | 需确认 onlyXxx 修饰符 | ⚠️ P-2
+ERC-20 标准 | transfer/approve/transferFrom | 继承 OpenZeppelin ERC20 | ✅
+minter 管理 | owner 可添加/移除 minter | setMinter(addr, bool) onlyOwner | ⚠️ P-3
+lockedBalance 存储 | Agent 锁仓余额独立记录 | mapping(uint256=>uint256) lockedBalance | ⚠️ P-4
+burn 函数 | 设计未明确 | 无 burn / burnFrom | ⚠️ P-6
+编号 | 风险等级 | 问题描述 | 影响资金 | 紧急程度
+P-1 | 高风险 | mintFree 无总量上限——上游合约漏洞可导致 DNAGOLD 无限增发 | 是(直接) | 立即修复
+P-2 | 高风险 | addLocked / decreaseLockedBalance 权限设计需严格确认——任意调用者可伪造锁仓 | 是(直接) | 立即修复
+P-3 | 中风险 | owner 可通过 setMinter 随时添加新铸造者——单点权限过度集中 | 是(间接) | 建议修复
+P-4 | 中风险 | lockedBalance 存储在 DNAGold 合约内——EconomyEngine 读取与 DNAGold 写入的数据源需对齐 | 否 | 建议确认
+P-5 | 低风险 | 无 blacklist 或 freeze 机制——无法在出现问题时冻结特定地址 | 否 | 建议确认
+P-6 | 低风险 | 代币没有 burn 函数——通缩机制缺失，无法通过销毁平衡通胀 | 否 | 建议添加
+P-1 | [高风险]  mintFree 无总量上限检查——上游漏洞组合可导致 DNAGOLD 无限增发
+P-2 | [高风险]  addLocked / decreaseLockedBalance 权限设计需严格确认——任意调用可伪造或清空锁仓
+P-3 | [中风险]  setMinter 无时间锁——owner 可即时授权任意地址铸造 DNAGOLD
+P-4 | [中风险]  lockedBalance 存储在 DNAGold——需确认 EconomyEngine 读取的是同一数据源
+P-5 | [低风险]  无 freeze / blacklist 机制——无法在紧急情况下冻结特定地址
+P-6 | [低风险]  无 burn 函数——通缩机制缺失，无法通过代币销毁平衡长期通胀
+优先级 | 编号 | 问题 | 行动
+P0 | P-1 | mintFree 无总量上限，与上游漏洞组合可无限增发 | mintFree 加 require(totalSupply()+amount <= MAX_SUPPLY)
+P0 | P-2 | addLocked / decreaseLockedBalance 权限需立即确认 | 确认两函数的 onlyXxx 修饰符；建议使用 AccessControl 分离角色
+P1 | P-3 | setMinter 无时间锁，owner 私钥泄露即失控 | owner 迁移至多签钱包（Gnosis Safe）；或加 48h 时间锁
+P1 | P-4 | lockedBalance 数据源归属不明 | 确认单一权威数据源，统一 EconomyEngine 和 DNAGold 的读写路径
+P2 | P-5/6 | 无 freeze 机制 / 无 burn 函数 | 根据游戏设计决策；建议添加 ERC20Burnable；freeze 需权衡去中心化
+攻击链 | 漏洞组合 | 影响
+批量饥饿 | BehaviorEngine P-1（lastGatherBlock=0）→ DeathEngine P-2（饥饿检测） | 所有未Gather Agent可被立即触发饥饿死亡，7天内窗口开启
+无限增发 | BehaviorEngine P-3（gather无冷却）→ EconomyEngine P-1（mintFree模式）→ DNAGold P-1（无总量上限） | 机器人每3秒刷取，DNAGOLD无限增发，代币价值归零
+半死幽灵 | DeathEngine P-1（try-catch吞失败）→ WorldMap（地图残留）→ EconomyEngine（非法Gather） | 死亡Agent仍可Gather，获取不合法奖励
+锁仓劫持 | AgentBridge P-1（无重入）+ DNAGold P-2（addLocked无权限）→ 无限锁仓→无限提取 | 直接盗取DNAGOLD资产
+减半DoS | EconomyEngine P-2（while循环无上限）→ BehaviorEngine reproduce/gather gas耗尽 | 关键操作不可用，游戏停止运行
+函数 | 可调用方 | 类型 | 备注
+mintFree(to, amount) | minter 地址 | 写 | 无总量上限检查；见P-1；核心铸造入口
+addLocked(agentId, amount) | 待确认权限 | 写 | 增加Agent锁仓余额；权限见P-2；数据源见P-4
+decreaseLockedBalance(agentId, amount) | 待确认权限 | 写 | 减少Agent锁仓余额；权限见P-2
+lockedBalance(agentId) | 任意 | view | 查询Agent锁仓余额；数据源归属见P-4
+setMinter(addr, bool) | owner | 写 | 授权/撤销minter；无时间锁见P-3
+transfer / approve / transferFrom | 持有者 | 写 | 标准ERC-20；无特殊修改
+totalSupply() | 任意 | view | 当前总供应量；MAX_SUPPLY=10亿
+burn(amount) | （未实现） | 写 | 通缩机制缺失；见P-6
+
+========== CodeDNA_Audit_10_ReproductionEngine.txt ==========
+
+
+CodeDNA 智能合约安全审计报告
+ 
+
+合约 #10 — ReproductionEngine (繁殖引擎)
+BNB Smart Chain 主网  Agent 繁殖逻辑  亲属检查  NFT 铸造调用
+
+
+1. 审计概述
+ReproductionEngine 负责 CodeDNA 中 Agent 的繁殖逻辑，是 BehaviorEngine 调用 reproduce() 时的核心后端合约。它负责验证两个父母 Agent 的合法性（存活、性别、亲属关系、繁殖冷却），并在所有条件满足后触发 GenesisCore.mintAgent 铸造新 Agent NFT，同时通知 FamilyTracker 和 EconomyEngine 更新相关状态。
+
+⚠️ 架构说明： BehaviorEngine 中原有的 reproduce() 逻辑可能已经包含了亲属检查和 mint 调用，ReproductionEngine 作为独立合约可能是将繁殖逻辑从 BehaviorEngine 中拆分出来的专用模块。需确认两者的实际分工边界，避免逻辑重复或遗漏。
+
+
+2. 链上实时状态
+
+3. 设计文档一致性核查
+
+4. 安全风险详情
+本次审计共发现 1个高风险、3个中风险、3个低风险 问题。P-1（亲属检查深度不足）和 P-3（同宿主绕过）是繁殖系统经济安全的核心风险。
+
+
+问题详情
+问题描述
+ReproductionEngine 通过 FamilyTracker.isDirectRelative(fatherId, motherId) 检查亲属关系，但根据 FamilyTracker 审计（#4，P-4），isDirectRelative 只检查直接父子关系（2层），祖孙关系（3层）、堂兄弟（同祖父母的不同子女）均无法被检测到。
+在游戏中，玩家可以有意识地进行近亲繁殖策略：让高属性祖父与孙女繁殖，或让同一父母的兄妹繁殖，快速积累高属性 Agent，破坏游戏的属性平衡设计。
+相关代码
+// FamilyTracker.isDirectRelative 只检查2层：
+function isDirectRelative(uint256 aId, uint256 bId) external view returns (bool) {
+    // 仅检查 a是b的父母 或 b是a的父母
+    return parents[bId][0]==aId || parents[bId][1]==aId ||
+           parents[aId][0]==bId || parents[aId][1]==bId;
+    // ❌ 未检查：祖父/祖母关系（3层）
+    // ❌ 未检查：同父母兄弟姐妹（共同父母）
+}
+影响分析
+攻击者可设计繁殖路径：A+B→C，A+D→E，然后 C+E 繁殖（同父异母兄妹）。isDirectRelative 检查 C 和 E 的直系关系时，因为 C 和 E 不是彼此的父母，返回 false，允许繁殖。通过多代近亲繁殖可迅速培育全高属性 Agent，对游戏经济平衡造成破坏。
+修复建议
+在 FamilyTracker 层添加 familyRoot 近亲检查：
+function isCloseRelative(uint256 aId, uint256 bId) external view returns (bool) {
+    // 检查是否共享同一 familyRoot（3代内）
+    bytes32 rootA = familyRoot[aId];
+    bytes32 rootB = familyRoot[bId];
+    if (rootA != bytes32(0) && rootA == rootB) return true;
+    // 检查同父母（兄弟姐妹）
+    if (parents[aId][0] != 0 && (parents[aId][0]==parents[bId][0] || parents[aId][0]==parents[bId][1])) return true;
+    if (parents[aId][1] != 0 && (parents[aId][1]==parents[bId][0] || parents[aId][1]==parents[bId][1])) return true;
+    return false;
+}
+ReproductionEngine 中将 isDirectRelative 替换为 isCloseRelative 调用。
+
+问题描述
+ReproductionEngine 对每个 Agent 的繁殖限制可能仅通过 reproduceCount <= MAX_REPRODUCE_COUNT 来控制，没有基于区块数的冷却时间（如 lastReproduceBlock + REPRODUCE_COOLDOWN）。这意味着在单次交易或连续区块内，玩家可以让 Agent 快速完成所有允许的繁殖次数，快速产出大量后代。
+这与 gather 无冷却（BehaviorEngine P-3）的问题性质相同：次数限制可以在短时间内被耗尽，而不是按设计意图分散在游戏周期内。
+相关代码
+uint256 public constant MAX_REPRODUCE_COUNT = 5;  // 生命周期内最多繁殖5次
+
+function reproduce(uint256 fatherId, uint256 motherId) external {
+    // ✅ 次数检查存在
+    require(genesisCore.reproduceCount(fatherId) < MAX_REPRODUCE_COUNT, "Father exhausted");
+    require(genesisCore.reproduceCount(motherId) < MAX_REPRODUCE_COUNT, "Mother exhausted");
+    // ❌ 无区块冷却：lastReproduceBlock 未检查
+    // 可在 5 个连续区块内完成全部 5 次繁殖
+    ...
+}
+影响分析
+玩家可以通过脚本在最短时间内完成 Agent 的全部繁殖配额，快速产出最多后代，不受设计意图中「繁殖需要时间」的约束。
+修复建议
+添加基于区块的繁殖冷却（约1天=28800区块）：
+mapping(uint256 => uint256) public lastReproduceBlock;
+uint256 public constant REPRODUCE_COOLDOWN = 28800;
+
+require(block.number >= lastReproduceBlock[fatherId] + REPRODUCE_COOLDOWN, "Father cooldown");
+require(block.number >= lastReproduceBlock[motherId] + REPRODUCE_COOLDOWN, "Mother cooldown");
+// 繁殖成功后更新：
+lastReproduceBlock[fatherId] = block.number;
+lastReproduceBlock[motherId] = block.number;
+
+问题描述
+ReproductionEngine 的 reproduce() 要求调用者是 msg.sender，但若检查逻辑为 ownerOf(fatherId) == msg.sender && ownerOf(motherId) == msg.sender，则不允许不同宿主之间的 Agent 繁殖。若设计允许跨宿主繁殖（PvP 繁殖模式），则需要双方签名或授权机制，否则 A 宿主的 Agent 可能被 B 宿主的 Agent「强制繁殖」。
+若仅检查 ownerOf(fatherId) == msg.sender，则 B 宿主可以用 B 的 fatherId + A 的 motherId（只要 motherId 在同一地块），在 A 不知情的情况下消耗 A 的 Agent 繁殖次数。
+相关代码
+// 若只检查 father 的宿主：
+require(genesisCore.ownerOf(fatherId) == msg.sender, "Not father owner");
+// ❌ 未检查 mother 的宿主
+// B 可用自己的 fatherId + A 的 motherId 调用
+// 消耗 A 的 mother 繁殖次数，A 不知情
+影响分析
+攻击者可消耗其他玩家 Agent 的繁殖配额，使其无法完成自己计划的繁殖。虽然攻击者也消耗自己 Agent 的配额，属于零和攻击，但对受害者造成实际资产价值损失（繁殖机会是有限资源）。
+修复建议
+强制要求两个 Agent 归属同一宿主（若设计为单宿主繁殖）：
+require(genesisCore.ownerOf(fatherId) == msg.sender, "Not father owner");
+require(genesisCore.ownerOf(motherId) == msg.sender, "Not mother owner");
+
+若设计支持跨宿主繁殖，需引入双方授权机制：
+mapping(uint256 => mapping(uint256 => bool)) public reproduceApproval;
+// mother 宿主提前授权 father 与其繁殖
+function approveReproduce(uint256 motherId, uint256 fatherId) external {
+    require(ownerOf(motherId) == msg.sender);
+    reproduceApproval[motherId][fatherId] = true;
+}
+
+问题描述
+设计文档中繁殖应需要消耗一定 DNAGOLD（繁殖费用），这构成 DNAGOLD 的消耗端（通缩），与 Gather 奖励的铸造端（通胀）形成经济闭环。需确认 ReproductionEngine 中是否有 dnagold.transferFrom(msg.sender, treasury/burn, reproduceFee) 的调用。
+若繁殖费用为零（未实现），则玩家可以无成本地持续繁殖（受次数限制），新 Agent 的铸造完全免费，会加速 Agent 总数增长，稀释每个 Agent 的 Gather 产出（稀释因子上升），影响所有玩家的收益。
+相关代码
+// 需确认是否存在：
+uint256 public reproduceFee = 100 * 1e18;  // 100 DNAGOLD
+dnagold.transferFrom(msg.sender, address(0), reproduceFee);  // burn
+// 或
+dnagold.transferFrom(msg.sender, treasury, reproduceFee);  // 入库
+// ❓ 若此调用缺失，繁殖完全免费
+影响分析
+若繁殖费用缺失，玩家在 Agent 生命周期内可免费获得最多 MAX_REPRODUCE_COUNT 个后代，加速 Agent 总数膨胀，破坏 EconomyEngine 的稀释机制设计。
+修复建议
+确认并补充繁殖费用收取逻辑：
+uint256 public reproduceFee;  // 由 owner 设置
+if (reproduceFee > 0) {
+    require(dnagold.transferFrom(msg.sender, burnAddress, reproduceFee), "Fee failed");
+}
+建议将繁殖费用设为 burn（销毁），与 DNAGold P-6 的通缩机制补充配合，形成完整的代币销毁场景。
+
+问题描述
+若新生 Agent 的属性为父母属性的均值（或加权平均），玩家可以通过「属性配对」策略：持续选择高属性 Agent 繁殖，逐代提升后代属性，最终培育出远超初始属性上限的 Agent（属性最大值理论上趋近于父母最大值的上界，而非固定上限）。
+这是否符合设计意图取决于游戏设计者的考量：属性为遗传特征可能是有意为之的进化玩法设计。
+影响分析
+若属性遗传确实是设计意图，当前实现正确，但需在游戏文档中说明「属性可通过繁殖提升」的上限规则。
+若需要限制属性膨胀，可引入属性衰退因子：newAttr = (fAttr + mAttr) / 2 * 0.95 + random()，确保属性不会无限提升。
+修复建议
+属性遗传机制是设计决策，建议在游戏白皮书中明确说明属性遗传规则，供玩家理解游戏经济平衡。
+
+问题描述
+BehaviorEngine 的 reproduce() 函数（审计 #7）已经包含了部分繁殖逻辑（亲属检查、mintAgent 调用、registerBirth、incrementBorn）。ReproductionEngine 作为独立合约的引入，需要明确其与 BehaviorEngine 的职责划分，否则会出现：双重亲属检查（浪费 gas）；BehaviorEngine 绕过 ReproductionEngine 直接调用 GenesisCore.mintAgent（逻辑不一致）；ReproductionEngine 的冷却管理与 BehaviorEngine 的状态更新不同步。
+影响分析
+若 BehaviorEngine 直接调用 GenesisCore.mintAgent 而不经过 ReproductionEngine，则 ReproductionEngine 的安全检查完全被绕过，P-1 至 P-4 的所有问题都无法起到防护作用。
+修复建议
+明确架构边界：BehaviorEngine.reproduce() 应该仅作为入口，所有繁殖逻辑（验证、铸造、注册）统一由 ReproductionEngine 处理。BehaviorEngine 不应直接调用 GenesisCore.mintAgent。建议在代码注释和文档中明确标注调用链：BehaviorEngine.reproduce() → ReproductionEngine.executeReproduce() → GenesisCore.mintAgent()。
+
+问题描述
+FamilyTracker.removeAgent（审计 #4，P-3）不清除 parents[]、registered、familyRoot 等状态。若死亡 Agent 的亲属关系数据仍保留，ReproductionEngine 在调用 isDirectRelative 时可能对已死亡的亲属关系做出错误判断（如允许与已死亡父母重新配对）或导致亲属数据不一致。
+影响分析
+若死亡 Agent 的 parents 记录未清除，其后代在进行亲属检查时仍能正确识别与死亡 Agent 的亲属关系，不会产生直接安全漏洞。但数据残留会导致 FamilyTracker 中存在大量幽灵数据，影响链上查询准确性。
+修复建议
+与 FamilyTracker P-3 修复同步处理：removeAgent 时清除 parents[id]、registered[id]、familyRoot[id]，确保死亡后亲属数据一致。参见 FamilyTracker 审计 #4 的修复建议。
+
+5. 总结与修复优先级
+
+附录：ReproductionEngine 关键函数速查
+
+— 审计报告结束 —
+合约地址 | 0x7873ECE552C11C31Fb37822c8B5c699b4Fd51c04
+合约名称 | ReproductionEngine.sol
+合约类型 | 繁殖引擎 — 亲属验证、繁殖冷却、NFT 铸造触发
+编译器版本 | v0.8.24+commit.e11b9ed9
+部署时间 | 2026-03-04
+部署者 | 0xa172aBd7...2159ebB07
+交易数 | 0（部署后暂无繁殖交易，游戏早期）
+审计日期 | 2026-03-05
+审计轮次 | 补充轮次 #10
+审计范围 | 详情
+合约文件 | ReproductionEngine.sol（依赖 GenesisCore、FamilyTracker、EconomyEngine、DeathEngine 接口）
+核心职责 | 父母合法性验证 · 亲属关系检查 · 繁殖冷却管理 · mintAgent 触发 · 出生注册
+审计重点 | 繁殖条件检查完整性、亲属检查深度、冷却绕过风险、与 BehaviorEngine 的职责重叠
+关联风险 | 与 BehaviorEngine P-2（reproduce gas 风险）、FamilyTracker P-3（removeAgent 不清除状态）强相关
+指标 | 当前数据
+交易总数 | 0（游戏早期，暂无繁殖操作）
+持有资产 | 0 BNB，0 DNAGOLD（纯逻辑合约）
+gameContract 角色 | 可能是 GenesisCore 的授权 minter；FamilyTracker/EconomyEngine 的 gameContract
+与 BehaviorEngine 关系 | 需确认 BehaviorEngine.reproduce() 是直接调用 ReproductionEngine 还是包含重复逻辑
+检查项 | 设计文档要求 | 合约实现 | 状态
+父母存活检查 | 两个父母均须存活 | require(!death.isDead(fatherId) && !death.isDead(motherId)) | ✅
+性别检查 | 一父一母（gender=0/1） | require(genesisCore.getGender(f)==0 && getGender(m)==1) | ✅
+亲属检查 | 禁止直系亲属繁殖 | family.isDirectRelative(fId, mId) revert | ⚠️ P-1
+繁殖冷却 | 每个 Agent 有繁殖间隔限制 | reproduceCount + lastReproduceBlock 检查 | ⚠️ P-2
+同宿主检查 | 两个父母须属于同一宿主 | require(ownerOf(fId)==ownerOf(mId))==msg.sender | ⚠️ P-3
+同地块检查 | 两个父母须在同一地块 | worldMap.agentLocation(fId)==agentLocation(mId) | ✅
+繁殖费用 | 需支付一定 DNAGOLD 费用 | 需确认是否有 fee 收取逻辑 | ⚠️ P-4
+新生 Agent 初始化 | lastGatherBlock 须设为 block.number | 依赖 BehaviorEngine.placeAgent（BE-P1 确认） | ⚠️ BE-P1
+繁殖次数上限 | 每个 Agent 有生命周期繁殖上限 | MAX_REPRODUCE_COUNT 检查 | ✅
+出生注册 | family.registerBirth + economy.incrementBorn | 铸造后调用两个下游合约 | ✅
+编号 | 风险等级 | 问题描述 | 影响资金 | 紧急程度
+P-1 | 高风险 | 亲属检查仅覆盖直系两层，祖孙/堂兄弟可繁殖——导致近亲繁殖积累属性 | 否 | 建议修复
+P-2 | 中风险 | 繁殖冷却以 reproduceCount 限制但无区块冷却——短时间内可连续繁殖至上限 | 否 | 建议修复
+P-3 | 中风险 | 同宿主检查不严格——可用不同地址的 Agent 绕过同宿主限制繁殖 | 否 | 建议修复
+P-4 | 中风险 | 繁殖费用（DNAGOLD）收取逻辑需确认——若缺失则繁殖无经济成本 | 是(间接) | 立即确认
+P-5 | 低风险 | 新生 Agent 属性计算依赖父母属性均值——可通过选择性繁殖快速提升属性上限 | 否 | 设计确认
+P-6 | 低风险 | 与 BehaviorEngine 繁殖逻辑职责边界不清晰——可能存在重复检查或遗漏 | 否 | 建议澄清
+P-7 | 低风险 | 死亡 Agent 的繁殖次数未重置——FamilyTracker.removeAgent 不清除 reproduceCount 记录 | 否 | 建议修复
+P-1 | [高风险]  亲属检查仅覆盖直系两层——祖孙、堂兄弟等近亲可繁殖
+P-2 | [中风险]  繁殖冷却仅限次数无区块冷却——可在同区块内完成多次繁殖
+P-3 | [中风险]  同宿主检查逻辑需确认——不同地址可绕过宿主限制协同繁殖
+P-4 | [中风险]  繁殖费用收取逻辑需确认——若缺失则繁殖零成本破坏经济模型
+P-5 | [低风险]  属性遗传为父母均值——可通过选择性繁殖快速堆高属性
+P-6 | [低风险]  与 BehaviorEngine 职责边界不清晰——可能存在逻辑重叠
+P-7 | [低风险]  死亡 Agent 状态残留影响繁殖合法性判断
+优先级 | 编号 | 问题 | 行动
+P0 | P-4 | 繁殖费用是否存在需立即确认 | 审查代码确认 transferFrom/burn 调用；若缺失立即补充
+P1 | P-1 | 亲属检查深度不足，祖孙/兄弟姐妹可繁殖 | isDirectRelative → isCloseRelative（加 familyRoot + 共同父母检查）
+P1 | P-3 | 同宿主检查不严格，可消耗他人 Agent 繁殖次数 | require 两个 Agent 均属 msg.sender；或实现双方授权机制
+P2 | P-2/6 | 繁殖无区块冷却 / 职责边界不清晰 | 加 REPRODUCE_COOLDOWN；明确 BehaviorEngine vs ReproductionEngine 调用链
+P3 | P-5/7 | 属性遗传设计确认 / 死亡状态残留 | 文档说明属性遗传规则；与 FamilyTracker P-3 同步修复
+函数 | 可调用方 | 类型 | 备注
+reproduce(fatherId, motherId) | BehaviorEngine / 宿主 | 写 | 核心繁殖入口；需经过完整7项验证
+isEligibleForReproduce(id) | 任意 | view | 查询 Agent 是否具备繁殖资格
+lastReproduceBlock(id) | 任意 | view | 上次繁殖区块；若无冷却则该字段可能不存在，见P-2
+setReproduceFee(amount) | owner | 写 | 设置繁殖费用；需确认此函数存在，见P-4
+setMaxReproduceCount(n) | owner | 写 | 设置繁殖上限；需有合理上限防止滥用
+
+========== CodeDNA_Audit_11_NFTSale.txt ==========
+
+
+CodeDNA 智能合约安全审计报告
+ 
+
+合约 #11 — NFTSale（创世 Agent 铸造销售）
+BNB Smart Chain 主网  |  用户支付 BNB 铸造 Genesis Agent NFT  |  真实 BNB 资金流转
+
+
+1. 审计概述
+NFTSale 是 CodeDNA 的创世 Agent 一级销售合约，是整个生态最先与真实资金接触的入口。玩家通过调用 mintGenesis 支付 0.1 BNB，合约调用 GenesisCore.mintFor 为玩家铸造 Genesis Agent NFT，同时向预设收款地址分发 0.02 BNB（20%收益分成）。合约还持有 50,000 DNAGOLD 作为购买奖励池。
+
+⚠️ 高优先级警示： NFTSale 直接持有并处理真实 BNB，是全系统唯一的资金入口合约。任何与 BNB 处理相关的漏洞（重入、超额收款、不可提款）都会造成真实资产损失，审计优先级高于其他纯逻辑合约。
+
+
+2. 链上实时状态
+
+3. 设计文档一致性核查
+
+4. 安全风险详情
+本次审计共发现 2个高风险、3个中风险、2个低风险 问题。P-3（重入攻击）和 P-4（BNB 提款锁定）是直接威胁真实资金安全的核心风险，需立即处理。
+
+
+问题详情
+问题描述
+mintGenesis 函数需要验证用户支付的 BNB 数量是否等于铸造价格。价格的来源有两种可能：①从 GenesisCore.getGenesisPrice() 动态读取（灵活但依赖外部调用）；②在 NFTSale 内部硬编码（固定但无法调整）。
+若价格硬编码在 NFTSale 中（如 uint256 public constant PRICE = 0.1 ether），当市场价格需要调整时，必须重新部署 NFTSale 合约，期间用户无法铸造，且旧合约中已收取的 0.4 BNB 需要手动迁移，存在操作风险。
+此外，若价格在 GenesisCore 和 NFTSale 中各自独立维护，两者可能不同步，造成用户按错误价格支付。
+相关代码
+// 方案A（推荐）：动态读取 GenesisCore 价格
+uint256 price = genesisCore.getGenesisPrice();
+require(msg.value >= price, "Insufficient BNB");
+
+// 方案B（风险）：NFTSale 内部硬编码
+uint256 public mintPrice = 0.1 ether;  // 需 owner 手动更新
+require(msg.value >= mintPrice, "Insufficient BNB");
+影响分析
+若 NFTSale 硬编码价格后 GenesisCore 价格更新，两合约价格不一致。玩家可能以旧价格铸造，合约无法按新价格收费，导致收益损失；或价格过高导致用户无法铸造，影响销售进度。
+修复建议
+统一价格来源：NFTSale 的 mintPrice 从 GenesisCore.getGenesisPrice() 读取，不独立维护价格字段。若需本地缓存，添加 syncPrice() 函数由 owner 手动同步，并 emit PriceSynced 事件。
+
+问题描述
+mintGenesis 函数为 payable，若校验逻辑使用 require(msg.value >= price) 而非 require(msg.value == price)，用户多付的 BNB 会被留存在合约中，既没有退款给用户，又没有计入合约方收益（因为收益分成只按固定 0.02 BNB 计算）。
+链上数据验证：5 笔铸造交易的 value 分别为 0.05088326、0.05325、0.05、0.05764533、0.05 BNB（单位从较低精度看，但注意实际收益分成每次固定 0.02 BNB），与预期 0.1 BNB 不符。若价格确为 0.1 BNB，则这些值显示用户可能以不同价格铸造，需进一步核查。
+无论如何，缺少超额退款逻辑是高风险设计缺陷。
+相关代码
+// 当前（推测）：只检查最低金额
+require(msg.value >= price, "Insufficient BNB");
+// ❌ 多付的 BNB 被锁在合约
+
+// 正确实现：精确匹配或退款
+require(msg.value >= price, "Insufficient BNB");
+uint256 refund = msg.value - price;
+if (refund > 0) {
+    (bool sent,) = payable(msg.sender).call{value: refund}("");
+    require(sent, "Refund failed");
+}
+影响分析
+用户若多支付 BNB（例如多付 0.01 BNB），该部分直接被合约吸收，用户无法追回。5 笔交易若均存在超付，总计可能有 0.02-0.05 BNB 的用户资金被意外锁定。
+修复建议
+修改铸造逻辑为精确金额校验或自动退款：方案 A（严格）：require(msg.value == price, "Exact BNB required")；方案 B（友好）：超额部分自动退回。推荐方案 B，同时在 mintGenesis 前加 nonReentrant 防止退款被重入利用。
+
+问题描述
+mintGenesis 内部在铸造完成后，通过 payable(treasury).call{value: 0.02 ether}("") 将 20% 收益转入收款地址。若收款地址（0xC2fDF351...b219）是一个合约且其 receive() 函数重新调用 mintGenesis，则在 minted NFT 数量更新前，攻击者可以多次铸造，绕过 MAX_GENESIS 上限。
+链上观察：0xC2fDF351...b219 每次都收到 0.02 BNB，该地址是否为合约需确认。若为 EOA 地址（外部账户），重入风险较低；若为合约地址，则需要关注其 receive() 实现。
+相关代码
+function mintGenesis() external payable {
+    require(genesisCore.totalGenesisCount() < genesisCore.MAX_GENESIS());
+    genesisCore.mintFor(msg.sender, ...);  // 铸造 NFT
+    // ❌ 铸造后立即进行外部调用
+    (bool sent,) = payable(treasury).call{value: 0.02 ether}("");
+    require(sent, "Treasury transfer failed");
+    // 若 treasury 是合约且重入调用，totalGenesisCount 可能未更新
+}
+影响分析
+若收款地址是含恶意代码的合约，可在铸造后重入 mintGenesis，绕过总量检查，连续铸造超出 MAX_GENESIS 上限的 Agent，破坏创世 Agent 的稀缺性。
+修复建议
+添加 nonReentrant 修饰符（OpenZeppelin ReentrancyGuard）；或遵循 CEI 模式（先更新状态，再进行外部调用）；或将收益分成改为「记录待提取」模式，由 treasury 主动调用 claimRevenue() 提取，避免铸造流程中发起外部调用。
+
+问题描述
+每笔 0.1 BNB 铸造中，0.02 BNB 转至 treasury，剩余 0.08 BNB 留在合约。当前合约余额 0.4 BNB（5 笔 × 0.08 BNB）。需确认合约是否存在安全的 withdraw() 函数供 owner 提取，以及 owner 地址是否为多签钱包。
+风险一：若无 withdraw 函数，0.4 BNB 永久锁定合约，无法提取（合约不可自毁）。风险二：若 withdraw 函数无 onlyOwner 保护，任意地址可提取所有 BNB。风险三：若 owner 是单签 EOA，私钥泄露即全额损失。
+相关代码
+// 需确认以下函数存在：
+function withdraw() external onlyOwner {
+    uint256 balance = address(this).balance;
+    (bool sent,) = payable(owner()).call{value: balance}("");
+    require(sent, "Withdraw failed");
+    emit Withdrawn(owner(), balance);
+}
+
+// 如果只有 receive() 无 withdraw()，BNB 被永久锁定
+影响分析
+若 withdraw 函数不存在或存在权限漏洞，当前 0.4 BNB 及后续所有铸造收入将面临锁定或被盗风险。随着销售量增加，合约内 BNB 余额将持续增长，风险敞口随之扩大。
+修复建议
+确认 withdraw 函数存在且为 onlyOwner；owner 迁移至多签钱包（Gnosis Safe 2/3），防止单点私钥风险；考虑添加 withdrawTo(address) 支持灵活提款地址；提款时 emit Withdrawn 事件便于监控。
+
+问题描述
+合约当前持有 50,000 DNAGOLD，这批代币可能用于：①作为铸造奖励，每次 mintGenesis 向买家分发固定数量 DNAGOLD；②作为早期流动性奖励，在销售结束后由 owner 手动分发；③误转入，非设计功能。
+若①（分发逻辑存在但有 bug），可能发生超额分发（50,000 DNAGOLD 被少数玩家领走）或欠额分发（DNAGOLD 永久锁定）。若③（误转入），需要 owner 通过 rescueToken 函数取回，否则 50,000 DNAGOLD 永久锁定。
+相关代码
+// 可能的实现（需确认）：
+uint256 public dnagoldBonus = 1000 * 1e18;  // 每次铸造奖励 1000 DNAGOLD
+
+function mintGenesis() external payable {
+    // ...价格检查...
+    genesisCore.mintFor(msg.sender, newTokenId);
+    dnagold.transfer(msg.sender, dnagoldBonus);  // 分发奖励
+    // ❓ 若 dnagold 余额耗尽但仍有人铸造，transfer 失败导致整个铸造失败
+}
+影响分析
+若 DNAGOLD 分发逻辑存在缺陷，可能导致早期购买者无法获得应有奖励，或 50,000 DNAGOLD（约占总供应量 0.005%）永久锁定在无法访问的合约中。
+修复建议
+确认 DNAGOLD 分发设计：若为铸造奖励，添加余额检查 require(dnagold.balanceOf(this) >= bonus)，当余额不足时停止铸造或跳过奖励；添加 rescueToken(address token, uint256 amount) onlyOwner 函数，允许 owner 提取意外锁定的 ERC20 代币。
+
+问题描述
+当前 mintGenesis 仅受 MAX_GENESIS 总量限制，无单地址铸造数量限制。单一地址可通过多笔交易铸造所有剩余 Genesis Agent（只要支付足够 BNB），垄断稀缺资源，破坏游戏公平性。
+创世 Agent 是稀缺 NFT，设计意图通常是供多名玩家广泛持有，而非被少数地址垄断。
+影响分析
+若 MAX_GENESIS 较小（例如 100 个），单人垄断风险极高。若 MAX_GENESIS 较大，风险相对降低。
+修复建议
+添加每钱包铸造上限：
+uint256 public maxPerWallet = 5;
+mapping(address => uint256) public mintedCount;
+require(mintedCount[msg.sender] + 1 <= maxPerWallet, "Wallet limit reached");
+mintedCount[msg.sender]++;
+
+问题描述
+NFTSale 可能缺少 Pausable 功能或 saleActive 开关。若铸造过程中发现重入漏洞或价格异常，无法立即暂停销售，攻击者可在修复期间持续利用漏洞。
+相关代码
+// 建议添加：
+bool public saleActive = true;
+modifier whenSaleActive() { require(saleActive, "Sale paused"); _; }
+function setSaleActive(bool active) external onlyOwner { saleActive = active; }
+
+function mintGenesis() external payable whenSaleActive { ... }
+影响分析
+若漏洞发生时无法暂停，开发团队无法有效阻止损失扩大。
+修复建议
+继承 OpenZeppelin Pausable 合约，铸造函数加 whenNotPaused 修饰符；pause() 权限授予多签钱包；在销售结束后调用 pause() 永久停止铸造入口。
+
+5. 总结与修复优先级
+⚠️ 特别警示： NFTSale 是全系统唯一持有真实 BNB 的合约，当前余额 0.4 BNB（约 $261）且随销售增长。P-2 和 P-4 需立即验证，防止用户资金损失和合约资金锁定。
+
+
+附录：NFTSale 关键函数速查
+
+— 审计报告结束 —
+合约地址 | 0xcBe90d6F542FCaafCdaCd569EeA66B87af56d7de
+合约名称 | NFTSale.sol
+合约类型 | 创世 Agent 一级销售 — 玩家支付 BNB 铸造首批 Genesis Agent
+编译器版本 | v0.8.24+commit.e11b9ed9  |  优化已启用 200 runs
+当前持仓 | 0.4 BNB（≈ $261）+ 50,000 DNAGOLD（创世奖励池）
+铸造单价 | 0.1 BNB / 个  |  每笔内部转账 0.02 BNB 至收款地址（20%）
+交易总数 | 5 笔（全部 Mint Genesis，含部署者自铸）
+收款地址 | 0xC2fDF35169946047ec2b0c9ef8f2a76cd417b219（每次铸造转入 0.02 BNB）
+审计日期 | 2026-03-05
+审计范围 | 详情
+合约文件 | NFTSale.sol（依赖 ISaleGenesisCore 接口：mintFor、getGenesisPrice、totalGenesisCount、MAX_GENESIS）
+核心资金流 | 用户 → 0.1 BNB → NFTSale → 0.02 BNB → 收款地址；0.08 BNB 留存合约
+DNAGOLD 流 | NFTSale 持有 50,000 DNAGOLD（可能作为购买奖励随铸造分发给买家）
+审计重点 | 重入攻击、价格校验、BNB 提款安全、DNAGOLD 分发逻辑、MAX_GENESIS 执行、白名单/数量限制
+指标 | 当前数据
+合约 BNB 余额 | 0.4 BNB（≈ $261）— 5 笔铸造 × 0.08 BNB = 0.4 BNB 留存
+DNAGOLD 余额 | 50,000 DNAGOLD（初始预充，待确认分发逻辑）
+铸造次数 | 5 次 mintGenesis（4 名用户 + 1 次部署者自铸）
+每笔收益分成 | 0.02 BNB → 0xC2fDF351...b219（每笔铸造后即时发送）
+当前铸造单价 | 0.1 BNB（从 getGenesisPrice() 读取 or 硬编码，需确认）
+MAX_GENESIS 上限 | 需确认（链上暂无满额记录，当前已铸：5）
+检查项 | 设计文档要求 | 合约实现 | 状态
+铸造价格来源 | 统一从 GenesisCore.getGenesisPrice() 读取 | 调用 genesisCore.getGenesisPrice() — 若硬编码则见 P-1 | ⚠️ P-1
+BNB 收款校验 | msg.value == 铸造价格，多退少不铸 | 需确认 require(msg.value >= price) 且有退款逻辑 | ⚠️ P-2
+MAX_GENESIS 总量上限 | 铸造不超过 MAX_GENESIS | 依赖 GenesisCore.totalGenesisCount() < MAX_GENESIS() | ✅
+收益分成转账 | 部分 BNB 实时转至收款地址 | 每笔 call{value: 0.02 BNB} 到 treasury — 重入风险见 P-3 | ⚠️ P-3
+剩余 BNB 提款 | owner 可安全提取合约 BNB | 需确认 withdraw() 函数且为 onlyOwner — 否则资金被锁 | ⚠️ P-4
+DNAGOLD 购买奖励 | 铸造时分发一定 DNAGOLD 给买家 | 需确认分发逻辑；否则 50,000 DNAGOLD 永久锁定 | ⚠️ P-5
+每地址铸造数量上限 | 单地址不可超额铸造 | 需确认 maxPerWallet 检查 | ⚠️ P-6
+暂停铸造机制 | 紧急情况下可暂停销售 | 需确认 Pausable 或 saleActive flag | ⚠️ P-7
+编号 | 风险等级 | 问题描述 | 影响资金 | 紧急程度
+P-1 | 高风险 | 铸造价格硬编码风险——若价格更新需重新部署合约 | 是（定价） | 确认价格来源
+P-2 | 高风险 | BNB 超额支付无退款——多付 BNB 被永久锁定合约 | 是（用户资金） | 立即修复
+P-3 | 中风险 | 收益分成用 call{value} 转账——若收款地址是合约可触发重入 | 是（合约 BNB） | 建议修复
+P-4 | 中风险 | 缺少 withdraw() 或权限不严格——0.4 BNB 可能被永久锁定 | 是（0.4 BNB） | 立即确认
+P-5 | 中风险 | 50,000 DNAGOLD 分发逻辑未确认——可能被永久锁定在合约 | 是（DNAGOLD） | 立即确认
+P-6 | 低风险 | 无每钱包铸造数量上限——单地址可批量铸造垄断 Genesis Agent | 否（公平性） | 建议修复
+P-7 | 低风险 | 缺少铸造暂停机制——漏洞发生时无法紧急停止销售 | 否（应急） | 建议添加
+P-1 | [高风险]  铸造价格来源需确认——硬编码价格导致价格更新困难
+P-2 | [高风险]  超额 BNB 支付无退款机制——用户多付 BNB 被永久锁定
+P-3 | [中风险]  收益分成使用 call{value} ——收款地址为合约时可触发重入
+P-4 | [中风险]  合约留存 BNB 的提款安全性需确认
+P-5 | [中风险]  50,000 DNAGOLD 分发逻辑需确认——可能被永久锁定
+P-6 | [低风险]  无每钱包铸造数量上限——单地址可批量购买垄断稀缺 Agent
+P-7 | [低风险]  缺少销售暂停机制——漏洞发生时无法紧急停止
+优先级 | 编号 | 问题 | 行动
+P0 | P-4 | 合约 BNB 留存提款能力立即确认 | 检查 withdraw() 函数；若缺失立即通过 GenesisCore 关闭铸造入口
+P0 | P-5 | 50,000 DNAGOLD 分发逻辑立即确认 | 确认分发设计；若无分发逻辑，立即通过 rescueToken 取回
+P1 | P-2 | 超额 BNB 无退款，用户资金损失 | 加退款逻辑 msg.value - price 返还；或严格 require == price
+P1 | P-3 | 收益分成 call{value} 重入风险 | 加 nonReentrant；或改为「先铸造、后提款」模式
+P2 | P-1/7 | 价格来源确认 / 暂停机制 | 统一价格来源；添加 Pausable 应急开关
+P3 | P-6 | 无每钱包铸造上限 | 加 maxPerWallet mapping 和检查逻辑
+函数 | 可调用方 | 类型 | 备注
+mintGenesis() | 任意（payable） | 写 | 核心铸造入口；支付 BNB 获得 Genesis Agent NFT
+withdraw() | onlyOwner | 写 | 提取合约留存 BNB；需确认此函数存在
+rescueToken(token, amount) | onlyOwner | 写 | 提取意外锁定的 ERC20（如多余 DNAGOLD）；需确认
+setSaleActive(bool) | onlyOwner | 写 | 暂停/恢复销售；需确认此函数存在
+setTreasury(address) | onlyOwner | 写 | 更新收益分成收款地址；需确认此函数存在
+getGenesisPrice() | 任意 | view | 查询当前铸造价格（可能代理到 GenesisCore）
+
+========== CodeDNA_Audit_12_NFTMarket.txt ==========
+
+
+CodeDNA 智能合约安全审计报告
+ 
+
+合约 #12 — NFTMarket（Agent 二级交易市场）
+BNB Smart Chain 主网  |  Agent NFT 挂单 / 取消 / 购买  |  BNB 资金撮合
+
+
+1. 审计概述
+NFTMarket 是 CodeDNA 生态的 Agent NFT 二级交易市场，支持玩家将 Agent NFT 挂单出售，其他玩家支付 BNB 购买。已观测到的方法为 listAgent（挂单）和 cancelListing（取消挂单），完整购买流程还包含 buyAgent 方法。
+
+NFTMarket 是全系统第二个与真实 BNB 资金直接交互的合约，也是 Agent NFT 流转的核心中转站。NFT 市场类合约的典型高危风险包括：重入攻击（购买时 BNB 转账触发回调）、幽灵挂单（Agent 死亡 / 转移后挂单未清除）、超额支付无退款以及平台手续费管理不当。
+
+
+2. 链上实时状态
+
+3. 设计文档一致性核查
+
+4. 安全风险详情
+本次审计共发现 2个高风险、3个中风险、3个低风险 问题。P-2（购买重入）与 P-1（幽灵挂单）是 NFT 市场类合约最高频的被攻击漏洞，需在开放购买功能前完成修复。
+
+
+问题详情
+问题描述
+NFT 市场有两种挂单模式：① Escrow 模式（listAgent 调用时 NFT 立即转入 NFTMarket 合约托管）；② Approve 模式（listAgent 仅授权合约，NFT 仍留在卖家手中）。
+若 NFTMarket 使用 Approve 模式，卖家在挂单后可以随时通过 GenesisCore.transferFrom 将 Agent 转移至其他地址，使 approve 失效。此时若有买家触发 buyAgent，合约会尝试 transferFrom(seller, buyer, tokenId)，但由于 NFT 已转走，此调用必然失败。
+关键风险点：若购买合约在 NFT 转移失败后未正确回滚 BNB 转账，买家将损失已支付的 BNB 却得不到 NFT。即使合约能正确 revert，Approve 模式也导致大量「无效挂单」存在于市场，严重损害用户体验与市场公信力。
+相关代码
+// ❌ Approve 模式（有风险）
+function listAgent(uint256 tokenId, uint256 price) external {
+    require(genesisCore.ownerOf(tokenId) == msg.sender, "Not owner");
+    genesisCore.approve(address(this), tokenId);   // 仅授权，NFT 留在卖家
+    listings[tokenId] = Listing(msg.sender, price, true);
+}
+
+// ✅ Escrow 模式（推荐）
+function listAgent(uint256 tokenId, uint256 price) external {
+    require(genesisCore.ownerOf(tokenId) == msg.sender, "Not owner");
+    genesisCore.transferFrom(msg.sender, address(this), tokenId);  // NFT 进托管
+    listings[tokenId] = Listing(msg.sender, price, true);
+}
+影响分析
+在 Approve 模式下，卖家可以反复「挂单-转走-再上架」实施钓鱼攻击，诱导买家触发失败的购买交易，消耗 gas 的同时破坏市场公信力；极端情况下，若代码存在 BNB 先转后 NFT 失败的顺序缺陷，可造成买家 BNB 永久损失。
+修复建议
+将挂单改为 Escrow 模式：listAgent 时通过 transferFrom 将 NFT 转入市场合约；cancelListing 时将 NFT 归还卖家；buyAgent 时从合约直接转给买家。Escrow 模式消除了挂单期间所有权变化的风险。
+
+问题描述
+buyAgent 的核心执行顺序是：① 校验买家支付金额；② 将 NFT 转移给买家；③ 向卖家转账 BNB（扣手续费）。若第③步的 BNB 转账使用 call{value}，且转账发生在删除挂单记录之前，恶意卖家合约可以在 receive() 中重新调用 buyAgent，在 listings[tokenId] 尚未被 delete 的情况下再次触发购买流程，实现重复消耗买家 BNB 或转走多份 NFT 的攻击。
+这是 NFT 市场合约最经典的重入漏洞场景，历史上 Nifty Gateway、多个 DeFi NFT 市场均因此类漏洞遭受损失。
+相关代码
+// ❌ 错误顺序（重入漏洞）
+function buyAgent(uint256 tokenId) external payable {
+    Listing storage l = listings[tokenId];
+    require(l.active, "Not listed");
+    require(msg.value >= l.price, "Insufficient");
+    // 先转 BNB → 触发重入 → listings 未清除 → 再次购买
+    payable(l.seller).call{value: l.price}("");
+    delete listings[tokenId];   // ❌ 太晚了
+    genesisCore.transferFrom(address(this), msg.sender, tokenId);
+}
+
+// ✅ 正确：CEI 模式 + nonReentrant
+function buyAgent(uint256 tokenId) external payable nonReentrant {
+    Listing memory l = listings[tokenId];   // memory 快照
+    require(l.active, "Not listed");
+    require(msg.value >= l.price, "Insufficient");
+    delete listings[tokenId];               // 先清除状态
+    genesisCore.safeTransferFrom(address(this), msg.sender, tokenId);
+    uint256 fee = l.price * platformFee / 10000;
+    payable(l.seller).call{value: l.price - fee}("");  // 最后转 BNB
+    if (msg.value > l.price) payable(msg.sender).call{value: msg.value - l.price}("");
+}
+影响分析
+成功重入的攻击者（恶意卖家合约）可以用单笔购买多次触发 listings 读取，在一次 buyAgent 调用链中重复骗取买家 BNB，或者多次转移同一 NFT。整个过程在单个区块内完成，无法通过链上监控及时阻止。
+修复建议
+① 强制添加 nonReentrant 修饰符（OpenZeppelin ReentrancyGuard）；② 严格遵循 CEI 模式：delete listings 必须在任何外部调用（NFT 转移、BNB 转账）之前执行；③ 建议将卖家 BNB 改为「记录余额-主动提款」模式（Pull Payment），彻底消除购买流程中的外部调用重入风险。
+
+问题描述
+当 DeathEngine 判定某 Agent 死亡时，它会更新 isDead 状态并可能触发 Agent NFT 的转移或 burn。但 NFTMarket 的 listings 映射不会自动清除已死亡 Agent 的挂单记录，导致市场上出现「幽灵挂单」——挂单看起来有效，但对应的 Agent 已失去全部游戏功能。
+买家若购买已死亡的 Agent，虽然技术上完成了 NFT 转移，但获得的是一个无法参与任何游戏活动的无价值资产。若市场 UI 不主动过滤死亡 Agent 的挂单，玩家将在不知情的情况下遭受损失。
+与 DeathEngine 审计（#6，P-2：WorldMap 未同步）、FamilyTracker 审计（#4，P-3：removeAgent 不清理状态）是同类的跨合约状态不同步问题。
+相关代码
+// DeathEngine 执行死亡后，NFTMarket listings 未清除
+function executeDeath(uint256 agentId) external {
+    isDead[agentId] = true;
+    worldMap.removeAgent(agentId);
+    // ❌ 未通知 NFTMarket 取消挂单
+    // listings[agentId] 仍然 active = true
+}
+
+// buyAgent 时若不检查存活状态，可购买死亡 Agent
+function buyAgent(uint256 tokenId) external payable {
+    // ❌ 缺少：require(!deathEngine.isDead(tokenId), "Agent is dead");
+}
+影响分析
+已死亡的 Agent NFT 在游戏中价值为零，但挂单价格可能接近正常 Agent 的市场价。不知情的买家支付真实 BNB 后只能持有一个「装饰性」NFT，无法参与任何 CodeDNA 游戏活动，造成实质性的 BNB 损失。
+修复建议
+双重防护方案：① 在 buyAgent 中添加存活检查：require(!deathEngine.isDead(tokenId), "Agent is dead")，若已死亡则 revert 并退还 BNB；② DeathEngine 执行死亡逻辑时主动调用 nftMarket.cancelListing(agentId)（需 DeathEngine 持有相应权限），确保死亡即时撤单；③ 前端过滤死亡 Agent 的挂单展示。
+
+问题描述
+NFTMarket 的 platformFee 决定每笔交易中平台抽成的比例。若 setPlatformFee 函数仅有 onlyOwner 保护且无手续费上限（MAX_FEE）限制，合约部署者可以在任何时刻将手续费设为 100%，使下一笔购买的全部 BNB 进入 feeRecipient，而卖家分文未得。
+即使团队无恶意，此设计也存在因 owner 私钥被盗而导致手续费被攻击者篡改的风险。另外，feeRecipient 若为单签 EOA，私钥泄露即导致所有历史累积手续费和未来手续费被盗。
+相关代码
+// ❌ 无上限、可即时修改的手续费
+uint256 public platformFee = 250;   // 初始 2.5%（基数 10000）
+address public feeRecipient;
+
+function setPlatformFee(uint256 newFee) external onlyOwner {
+    platformFee = newFee;   // ❌ 可设为 10000（100%），无上限检查
+}
+
+// ✅ 应有上限保护
+uint256 public constant MAX_FEE = 1000;   // 最高 10%
+function setPlatformFee(uint256 newFee) external onlyOwner {
+    require(newFee <= MAX_FEE, "Fee too high");
+    platformFee = newFee;
+    emit PlatformFeeUpdated(newFee);
+}
+影响分析
+若攻击者获取 owner 私钥，可将 platformFee 设为 10000（100%），此后每笔购买的全部 BNB 进入 feeRecipient，卖家颗粒无收，买家付出真实 BNB 却得不到应有价值。整个 NFT 市场经济将被瞬间摧毁。
+修复建议
+① 设置 MAX_FEE 常量（建议 ≤10%）并在 setPlatformFee 中强制检查；② 将 feeRecipient 迁移至多签钱包（Gnosis Safe 2/3）；③ 考虑为 setPlatformFee 添加 TimeLock（如 48 小时），让社区有足够时间发现并响应恶意修改。
+
+问题描述
+buyAgent 作为 payable 函数，若校验逻辑为 require(msg.value >= l.price) 而非精确匹配，买家多支付的 BNB 将留在合约（若合约无 withdraw）或直接进入系统（若合约即时流转）。无论哪种情况，买家均无法追回多付的 BNB。
+此问题与 NFTSale P-2 完全相同，是 payable 函数的通用设计缺陷，在二级市场场景中因用户可能手动输入价格而更易发生（用户输入 0.15 BNB 购买标价 0.1 BNB 的 Agent）。
+相关代码
+// ❌ 无退款：多付的 BNB 消失
+require(msg.value >= l.price, "Insufficient BNB");
+// msg.value = 0.15 BNB，l.price = 0.1 BNB
+// 多出的 0.05 BNB 被永久锁定或进入手续费池
+
+// ✅ 有退款
+require(msg.value >= l.price, "Insufficient BNB");
+uint256 excess = msg.value - l.price;
+if (excess > 0) {
+    (bool refunded,) = payable(msg.sender).call{value: excess}("");
+    require(refunded, "Refund failed");
+}
+影响分析
+每笔交易若存在 0.01-0.05 BNB 的超额支付，随着市场交易量增长，累计锁定的 BNB 可能达到数十至数百美元，对用户造成不可忽视的资金损失。
+修复建议
+在 buyAgent 末尾添加自动退款逻辑（在 CEI 模式中，退款调用置于最后）；或改为严格精确金额校验 require(msg.value == l.price)；推荐前者以提升用户体验。退款调用同样需要在 nonReentrant 保护下执行。
+
+问题描述
+listAgent 如果未 require(price > 0)，卖家可以意外地以 0 BNB 挂单。链上机器人（MEV bot）实时监控挂单事件，一旦检测到 price == 0 的挂单，会在同一区块内以 0 BNB 购买，卖家颗粒无收。即使合约本身不损失资金，此类事故会严重损害用户对市场的信任。
+相关代码
+// ❌ 缺少零价格检查
+function listAgent(uint256 tokenId, uint256 price) external {
+    // 未检查 price > 0
+    listings[tokenId] = Listing(msg.sender, price, true);
+}
+
+// ✅ 加入最低价格检查
+uint256 public constant MIN_PRICE = 0.001 ether;   // 最低 0.001 BNB
+require(price >= MIN_PRICE, "Price too low");
+影响分析
+卖家因误操作以 0 BNB 挂单后，在同区块即被机器人购走，NFT 永久损失且无法追回。
+修复建议
+添加 MIN_PRICE 常量检查（建议 ≥ 0.001 BNB）；前端 UI 对极低价格挂单展示警告提示，增加确认步骤。
+
+问题描述
+若 NFTMarket 不支持 Pausable（全局暂停），当出现重入漏洞或价格操纵等紧急情况时，开发团队无法立即冻结市场，攻击者可在修复部署前持续利用漏洞。鉴于 P-1、P-2 等高危漏洞的存在，暂停机制是必要的安全底线。
+相关代码
+// 建议继承 OpenZeppelin Pausable
+bool public marketActive = true;
+
+modifier whenMarketActive() {
+    require(marketActive, "Market paused");
+    _;
+}
+
+function setMarketActive(bool active) external onlyOwner { marketActive = active; }
+
+// listAgent、buyAgent 均加 whenMarketActive 修饰符
+影响分析
+在高危漏洞被发现到修复部署的窗口期内（通常数小时至数天），若无暂停机制，损失将持续扩大。
+修复建议
+继承 OpenZeppelin Pausable；pause() 权限授予多签钱包；buyAgent、listAgent 加 whenNotPaused；在正式上线前进行一次暂停-恢复演练确保机制正常工作。
+
+问题描述
+当 Agent 在 WorldMap 上处于活跃状态（agentOnMap = true）时，若玩家将其挂单至 NFTMarket，Agent 可能仍出现在地图上进行 Gather、Reproduce 等操作，同时其 NFT 处于市场挂单状态。若 buyAgent 成功，新宿主接管 NFT，但原宿主的 Agent 仍留在地图上（因为 WorldMap.agentLocation 以 agentId 为 key，与所有权无关）。
+这会导致：① 卖家在挂单期间可以继续操作 Agent，获取 Gather 收益，相当于「出售后继续使用」；② 购买者获得 NFT 后，Agent 仍在原宿主控制的地图位置，无法立即上手游玩。
+影响分析
+虽然不直接造成资金损失，但此类状态不同步破坏游戏公平性，可能被玩家滥用（大量挂单低价 Agent 以套取 Gather 收益同时出售）。
+修复建议
+在 listAgent 时检查 Agent 是否在地图上，若在则强制调用 worldMap.removeAgent(tokenId) 后再完成挂单；buyAgent 完成后通知 WorldMap 更新所有权信息。在 GameContract / BehaviorEngine 中，增加对 Agent 是否挂单中的检查，禁止挂单中的 Agent 执行 Gather / Reproduce 操作。
+
+5. 总结与修复优先级
+⚠️ 警示： 当前 buyAgent 尚无链上交易记录，市场处于测试/早期阶段。P-1 和 P-2 必须在 buyAgent 被正式使用前完成修复，否则一旦有真实 BNB 购买发生，攻击窗口即刻开启。
+
+
+附录：NFTMarket 关键函数速查
+
+跨合约关联风险汇总
+
+— 审计报告结束 —
+合约地址 | 0x90A7f9025D9a57508Aba43126f58DaB032C37371
+合约名称 | NFTMarket.sol
+合约类型 | Agent NFT 二级交易市场 — 挂单、取消挂单、购买撮合
+编译器版本 | v0.8.24+commit.e11b9ed9  |  优化已启用 200 runs
+当前持仓 | 0 BNB（撮合合约，BNB 即时流转）
+交易总数 | 2 笔（1× ListAgent + 1× CancelListing，同一测试地址）
+已观测方法 | listAgent（挂单）·  cancelListing（取消）
+部署者 | 0xa172aBd7...2159ebB07（与所有 CodeDNA 合约相同）
+审计日期 | 2026-03-05
+审计范围 | 详情
+合约文件 | NFTMarket.sol（依赖 GenesisCore ERC-721：ownerOf、transferFrom、safeTransferFrom）
+核心资金流 | 买家 BNB → NFTMarket（撮合）→ 卖家（扣手续费）；Agent NFT → 买家
+核心操作 | listAgent（挂单）· cancelListing（取消）· buyAgent（购买，尚无交易记录）
+审计重点 | 重入攻击 · 幽灵挂单（死亡 Agent）· NFT 托管模式 · 超额 BNB 退款 · 手续费逻辑 · 市场暂停
+指标 | 当前数据
+合约 BNB 余额 | 0 BNB（撮合合约，购买 BNB 即时流转至卖家）
+挂单操作 | 1 次 listAgent（0x571d447f...655F6aF15，已取消）
+取消挂单 | 1 次 cancelListing（同一地址，NFT 已归还）
+购买操作 | 0 次（暂无 buyAgent 记录，市场处于早期测试阶段）
+NFT 托管模式 | 需核查：listAgent 时是否有 NFT Transfer 至市场合约（Escrow）
+平台手续费 | 比例未知（需查合约代码确认 platformFee 变量值）
+检查项 | 设计文档要求 | 合约实现 | 状态
+NFT 托管模式 | 挂单期间 NFT 锁定，不可转移 | Escrow 模式安全；Approve 模式有幽灵风险见 P-1 | ⚠️ P-1
+购买重入防护 | nonReentrant + CEI 模式 | 需确认 delete listings 先于 BNB 转账执行 | ⚠️ P-2
+死亡 Agent 挂单清除 | Agent 死亡时撤销挂单 | DeathEngine 是否回调 NFTMarket.cancelListing？ | ⚠️ P-3
+平台手续费设置 | 固定比例，有上限保护 | 需确认 MAX_FEE 上限 + 时间锁 | ⚠️ P-4
+超额 BNB 退款 | msg.value 多于挂单价自动退款 | 需确认有 refund 逻辑（同 NFTSale P-2） | ⚠️ P-5
+最低挂单价格 | price > 0 校验 | require(price > 0) 是否存在 | ⚠️ P-6
+市场暂停机制 | 紧急情况可暂停所有交易 | Pausable / marketActive flag | ⚠️ P-7
+在场 Agent 挂单 | 游戏中 Agent 挂单时应离场 | WorldMap.removeAgent 是否在 listAgent 时调用？ | ⚠️ P-8
+编号 | 风险等级 | 问题描述 | 影响资金 | 紧急程度
+P-1 | 高风险 | approve 挂单模式 — NFT 可在挂单期间被转移，买家损失 BNB | 是（BNB） | 立即确认
+P-2 | 高风险 | buyAgent 转 BNB 时无重入防护 — 恶意卖家可重复触发购买 | 是（BNB+NFT） | 立即修复
+P-3 | 中风险 | Agent 死亡后挂单未撤销 — 买家购买无效资产损失 BNB | 是（BNB） | 建议修复
+P-4 | 中风险 | 手续费可即时修改至 100% — 单 EOA 可抽走全部交易金额 | 是（BNB） | 建议修复
+P-5 | 中风险 | 超额 BNB 支付无退款 — 买家多付部分被永久锁定 | 是（BNB） | 建议修复
+P-6 | 低风险 | 挂单价格无最低限制 — 可 0 BNB 挂单被前置购买 | 否 | 建议修复
+P-7 | 低风险 | 缺少市场暂停机制 — 漏洞发生时无法冻结所有交易 | 否 | 建议添加
+P-8 | 低风险 | 在地图上的 Agent 挂单后未离场 — 游戏状态与市场状态不同步 | 否 | 设计确认
+P-1 | [高风险]  approve 挂单模式 — NFT 可在挂单期间被转移，买家支付 BNB 却无法获得 NFT
+P-2 | [高风险]  buyAgent 向卖家转 BNB 时无重入防护 — 恶意卖家可重复购买
+P-3 | [中风险]  Agent 死亡后挂单未自动撤销 — 买家购买已死亡 Agent 损失 BNB
+P-4 | [中风险]  手续费可即时修改且无上限 — owner 可将 platformFee 设为 100%
+P-5 | [中风险]  超额 BNB 支付无退款 — 买家多付部分被永久锁定合约
+P-6 | [低风险]  挂单价格无最低限制 — 零价格挂单可被前置机器人购买
+P-7 | [低风险]  缺少市场全局暂停机制 — 漏洞发生时无法冻结所有挂单
+P-8 | [低风险]  游戏中 Agent 挂单后未强制离场 — 地图与市场状态不同步
+优先级 | 编号 | 问题 | 行动
+P0 | P-2 | 购买重入 — 最高危，buyAgent 上线前必须修复 | CEI 模式 + nonReentrant；delete listings 先于所有外部调用
+P0 | P-1 | approve 模式幽灵挂单 — 买家 BNB 损失风险 | 改为 Escrow 模式（NFT 转入市场合约托管）
+P1 | P-3 | 死亡 Agent 幽灵挂单 — 买家购买无效资产 | buyAgent 加 isDead 检查；DeathEngine 死亡时回调取消挂单
+P1 | P-4 | 手续费无上限，可即时设为 100% | 加 MAX_FEE 常量（≤10%）；feeRecipient 迁移多签
+P2 | P-5/7 | 超额 BNB 无退款 / 缺少暂停机制 | 加退款逻辑；继承 Pausable 并添加应急开关
+P3 | P-6/8 | 零价格挂单 / Agent 状态不同步 | 加 MIN_PRICE 检查；listAgent 时调用 worldMap.removeAgent
+函数 | 可调用方 | 类型 | 备注
+listAgent(tokenId, price) | NFT 宿主 | 写 | 挂单；建议 Escrow 模式 + worldMap.removeAgent 前置
+cancelListing(tokenId) | 挂单卖家 | 写 | 取消挂单，归还 NFT；已链上验证可正常执行
+buyAgent(tokenId) | 任意（payable） | 写 | 购买核心函数；P-1/P-2/P-3/P-5 均在此处触发
+setPlatformFee(newFee) | onlyOwner | 写 | 修改手续费；需 MAX_FEE 上限 + TimeLock 保护
+setFeeRecipient(addr) | onlyOwner | 写 | 修改收款地址；需多签保护
+pause() / unpause() | onlyOwner | 写 | 全局暂停/恢复；需在 P-7 修复后存在
+getListing(tokenId) | 任意 | view | 查询挂单信息：seller、price、active
+NFTMarket 问题 | 关联合约 | 关联问题 | 联合修复建议
+P-3 死亡幽灵挂单 | DeathEngine | DE-P1（try-catch 吞失败）导致死亡通知丢失 | DeathEngine 修复后同步添加 nftMarket.cancelListing 调用
+P-8 Agent 地图状态 | WorldMap | WM-P3（WorldMap 双写不一致） | listAgent 时统一通过 WorldMap.removeAgent 离场
+P-1/P-2 资金安全 | NFTSale | NS-P2（超额 BNB）/ NS-P3（重入） | 两个合约同批修复：统一 nonReentrant + 退款逻辑模板

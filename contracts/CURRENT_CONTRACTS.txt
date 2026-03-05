@@ -1,0 +1,3677 @@
+
+
+// ========== AgentBridge.sol ==========
+
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+/**
+ * @title AgentBridge
+ * @notice CodeDNA AI Agent 链上交互接口 — 聚合读取 + 行动验证 + 周边探测
+ *
+ * 全部 view/pure，零 gas 消耗。AI Agent 每回合只需一次 RPC 调用
+ * 即可获得完整的决策所需信息。
+ */
+
+/* ========== INTERFACES (read-only) ========== */
+
+interface IABGenesisCore {
+    function ownerOf(uint256 tokenId) external view returns (address);
+    function balanceOf(address owner) external view returns (uint256);
+    function getAttributes(uint256 tokenId) external view returns (uint16[8] memory attrs, uint8 gender);
+    function getGender(uint256 tokenId) external view returns (uint8);
+    function agentEnergy(uint256 tokenId) external view returns (uint256);
+    function lastEatBlock(uint256 tokenId) external view returns (uint256);
+    function reproduceCount(uint256 tokenId) external view returns (uint256);
+    function agentAttributeBonus(uint256 tokenId, uint256 idx) external view returns (uint16);
+    function totalGenesisCount() external view returns (uint256);
+    function totalTokenCount() external view returns (uint256);
+}
+
+interface IABDNAGold {
+    function lockedBalance(uint256 agentId) external view returns (uint256);
+    function balanceOf(address account) external view returns (uint256);
+}
+
+interface IABWorldMap {
+    function agentLocation(uint256 agentId) external view returns (uint256);
+    function agentOnMap(uint256 agentId) external view returns (bool);
+    function plotAgentCount(uint256 plotId) external view returns (uint256);
+    function getPlotType(uint256 plotId) external pure returns (uint8);
+    function getPlotMultiplier(uint256 plotId) external pure returns (uint256);
+    function getManhattanDistance(uint256 a, uint256 b) external pure returns (uint256);
+    function toCoords(uint256 plotId) external pure returns (uint256 x, uint256 y);
+}
+
+interface IABBehavior {
+    function getCurrentEnergy(uint256 id) external view returns (uint256);
+    function isEffectivelyDead(uint256 id) external view returns (bool);
+    function lastGatherBlock(uint256 id) external view returns (uint256);
+    function lastMoveBlock(uint256 id) external view returns (uint256);
+    function lastReproduceBlock(uint256 id) external view returns (uint256);
+    function lastRaidBlock(uint256 id) external view returns (uint256);
+    function lastShareBlock(uint256 id) external view returns (uint256);
+    function parentTeachBlock(uint256 id) external view returns (uint256);
+    function formallyDead(uint256 id) external view returns (bool);
+    // Constants (public constant → getter)
+    function GATHER_COOLDOWN() external view returns (uint256);
+    function EAT_COOLDOWN() external view returns (uint256);
+    function MOVE_COOLDOWN() external view returns (uint256);
+    function REPRODUCE_COOLDOWN() external view returns (uint256);
+    function RAID_COOLDOWN() external view returns (uint256);
+    function SHARE_COOLDOWN() external view returns (uint256);
+    function TEACH_COOLDOWN() external view returns (uint256);
+    function REPRODUCE_ENERGY_MIN() external view returns (uint256);
+    function REPRODUCE_GOLD_COST() external view returns (uint256);
+    function RAID_MIN_ENERGY() external view returns (uint256);
+    function TEACH_MIN_ENERGY() external view returns (uint256);
+    function EAT_COST() external view returns (uint256);
+    function RESCUE_COST() external view returns (uint256);
+    function MOVE_ENERGY_COST() external view returns (uint256);
+    function MAX_AGENTS_PER_HOST() external view returns (uint256);
+}
+
+interface IABEconomy {
+    function halvingCount() external view returns (uint256);
+    function totalBornAgents() external view returns (uint256);
+    function totalLivingAgents() external view returns (uint256);
+    function getGlobalDilutionFactor() external view returns (uint256);
+    function getCurrentBaseYield() external view returns (uint256);
+    function getPlotLeader(uint256 plotId) external view returns (uint256);
+    function calcGatherYield(uint256 agentId, uint256 plotId, uint256 plotCount, bool isLeader) external view returns (uint256);
+    function getPlotAgents(uint256 plotId) external view returns (uint256[] memory);
+}
+
+interface IABDeath {
+    function isDead(uint256 id) external view returns (bool);
+    function isEffectivelyDead(uint256 id) external view returns (bool);
+    function inDyingWindow(uint256 id) external view returns (bool);
+    function agentStatus(uint256 id) external view returns (uint8);
+}
+
+interface IABFamily {
+    function isDirectRelative(uint256 a, uint256 b) external view returns (bool);
+    function familyRoot(uint256 id) external view returns (uint256);
+    function getFamilyHeadcount(uint256 rootId) external view returns (uint256);
+    function getParents(uint256 id) external view returns (uint256 fatherId, uint256 motherId);
+    function registered(uint256 id) external view returns (bool);
+}
+
+contract AgentBridge {
+
+    /* ========== STRUCTS ========== */
+
+    struct AgentState {
+        // 基础
+        uint256 tokenId;
+        address owner;
+        uint256 currentEnergy;
+        uint256 maxEnergy;        // ENERGY_MAX_BASE + LIFESPAN bonus
+        uint256 locationX;
+        uint256 locationY;
+        uint256 lockedBalance;
+        uint8   status;           // 0=ALIVE, 1=DEAD
+        uint8   gender;
+        bool    onMap;
+        // 冷却 (0 = 可执行, >0 = 还剩多少块)
+        uint256 gatherCooldownLeft;
+        uint256 eatCooldownLeft;
+        uint256 moveCooldownLeft;
+        uint256 reproduceCooldownLeft;
+        uint256 raidCooldownLeft;
+        uint256 shareCooldownLeft;
+        uint256 teachCooldownLeft;
+        // DNA 属性 (含 teach bonus)
+        uint16[8] attributes;      // IQ,LEAD,STR,AGG,DIP,CRE,LIFE,FERT
+        uint16[8] attributeBonus;  // teach 加成
+        // 繁殖
+        uint256 reproduceCount;
+        uint256 reproduceLimit;    // FERTILITY / 32
+        // 家族
+        uint256 familyRoot;
+        uint256 familyHeadcount;
+        uint256 fatherId;
+        uint256 motherId;
+        // 世界经济
+        uint256 halvingCount;
+        uint256 dilutionFactor;
+        uint256 totalLiving;
+        uint256 baseYield;
+        // 当前地块
+        uint8   plotType;
+        uint256 plotMultiplier;
+        uint256 plotAgentCount;
+        bool    isPlotLeader;
+        uint256 estimatedGatherYield;
+    }
+
+    struct NearbyAgent {
+        uint256 tokenId;
+        uint256 locationX;
+        uint256 locationY;
+        uint256 distance;
+        uint256 currentEnergy;
+        address owner;
+        uint8   gender;
+        uint8   status;
+        uint256 lockedBalance;
+    }
+
+    /* ========== STATE ========== */
+
+    IABGenesisCore public immutable core;
+    IABDNAGold     public immutable dnagold;
+    IABWorldMap    public immutable worldMap;
+    IABBehavior    public immutable behavior;
+    IABEconomy     public immutable economy;
+    IABDeath       public immutable death;
+    IABFamily      public immutable family;
+
+    /* ========== CONSTRUCTOR ========== */
+
+    constructor(
+        address _core,
+        address _dnagold,
+        address _worldMap,
+        address _behavior,
+        address _economy,
+        address _death,
+        address _family
+    ) {
+        core     = IABGenesisCore(_core);
+        dnagold  = IABDNAGold(_dnagold);
+        worldMap = IABWorldMap(_worldMap);
+        behavior = IABBehavior(_behavior);
+        economy  = IABEconomy(_economy);
+        death    = IABDeath(_death);
+        family   = IABFamily(_family);
+    }
+
+    /* ========== 1. getAgentFullState ========== */
+
+    function getAgentFullState(uint256 tokenId) external view returns (AgentState memory s) {
+        s.tokenId = tokenId;
+
+        // Owner (may revert for non-existent token — caller's responsibility)
+        try core.ownerOf(tokenId) returns (address o) {
+            s.owner = o;
+        } catch {}
+
+        // Energy (try-catch: may fail if agent doesn't exist)
+        try behavior.getCurrentEnergy(tokenId) returns (uint256 e) {
+            s.currentEnergy = e;
+        } catch {}
+        {
+            try core.getAttributes(tokenId) returns (uint16[8] memory attrs, uint8 gender) {
+                s.attributes = attrs;
+                s.gender = gender;
+                s.maxEnergy = 100 + (uint256(attrs[6]) * 25 / 255);
+            } catch {}
+        }
+
+        // Location
+        s.onMap = worldMap.agentOnMap(tokenId);
+        if (s.onMap) {
+            uint256 plotId = worldMap.agentLocation(tokenId);
+            (s.locationX, s.locationY) = worldMap.toCoords(plotId);
+
+            // Plot info
+            s.plotType       = worldMap.getPlotType(plotId);
+            s.plotMultiplier = worldMap.getPlotMultiplier(plotId);
+            s.plotAgentCount = worldMap.plotAgentCount(plotId);
+
+            // Leader check
+            try economy.getPlotLeader(plotId) returns (uint256 leaderId) {
+                s.isPlotLeader = (leaderId == tokenId);
+            } catch {}
+
+            // Estimated gather yield
+            try economy.calcGatherYield(tokenId, plotId, s.plotAgentCount, s.isPlotLeader) returns (uint256 y) {
+                s.estimatedGatherYield = y;
+            } catch {}
+        }
+
+        // Balance
+        s.lockedBalance = dnagold.lockedBalance(tokenId);
+
+        // Status
+        try death.agentStatus(tokenId) returns (uint8 st) {
+            s.status = st;
+        } catch {}
+
+        // Cooldowns (wrapped in try-catch for robustness)
+        try behavior.lastGatherBlock(tokenId) returns (uint256 v) {
+            s.gatherCooldownLeft = _cooldownLeft(v, behavior.GATHER_COOLDOWN());
+        } catch {}
+        try core.lastEatBlock(tokenId) returns (uint256 v) {
+            s.eatCooldownLeft = _cooldownLeft(v, behavior.EAT_COOLDOWN());
+        } catch {}
+        try behavior.lastMoveBlock(tokenId) returns (uint256 v) {
+            s.moveCooldownLeft = _cooldownLeft(v, behavior.MOVE_COOLDOWN());
+        } catch {}
+        try behavior.lastReproduceBlock(tokenId) returns (uint256 v) {
+            s.reproduceCooldownLeft = _cooldownLeft(v, behavior.REPRODUCE_COOLDOWN());
+        } catch {}
+        try behavior.lastRaidBlock(tokenId) returns (uint256 v) {
+            s.raidCooldownLeft = _cooldownLeft(v, behavior.RAID_COOLDOWN());
+        } catch {}
+        try behavior.lastShareBlock(tokenId) returns (uint256 v) {
+            s.shareCooldownLeft = _cooldownLeft(v, behavior.SHARE_COOLDOWN());
+        } catch {}
+        try behavior.parentTeachBlock(tokenId) returns (uint256 v) {
+            s.teachCooldownLeft = _cooldownLeft(v, behavior.TEACH_COOLDOWN());
+        } catch {}
+
+        // Attribute bonuses
+        for (uint8 i = 0; i < 8; i++) {
+            try core.agentAttributeBonus(tokenId, i) returns (uint16 b) {
+                s.attributeBonus[i] = b;
+            } catch {}
+        }
+
+        // Reproduce
+        try core.reproduceCount(tokenId) returns (uint256 rc) {
+            s.reproduceCount = rc;
+        } catch {}
+        s.reproduceLimit = uint256(s.attributes[7]) / 32; // FERTILITY / 32
+
+        // Family
+        try family.registered(tokenId) returns (bool reg) {
+            if (reg) {
+                s.familyRoot = family.familyRoot(tokenId);
+                s.familyHeadcount = family.getFamilyHeadcount(s.familyRoot);
+                (s.fatherId, s.motherId) = family.getParents(tokenId);
+            }
+        } catch {}
+
+        // World economy
+        try economy.halvingCount() returns (uint256 v) { s.halvingCount = v; } catch {}
+        try economy.getGlobalDilutionFactor() returns (uint256 v) { s.dilutionFactor = v; } catch {}
+        try economy.totalLivingAgents() returns (uint256 v) { s.totalLiving = v; } catch {}
+        try economy.getCurrentBaseYield() returns (uint256 v) { s.baseYield = v; } catch {}
+    }
+
+    /* ========== 2. getNearbyAgents ========== */
+
+    /**
+     * @notice 扫描中心地块周围 radius 格内的所有 Agent
+     * @param centerPlotId 中心地块 ID
+     * @param radius       扫描半径 (曼哈顿距离)
+     * @return agents      周边 Agent 信息数组
+     *
+     * @dev 最大扫描范围: radius=5 → 最多 61 格。radius=10 → 221 格。
+     *      每格查 plotAgentCount + getPlotAgents，gas 与 Agent 密度成正比。
+     *      建议 radius ≤ 10。
+     */
+    function getNearbyAgents(uint256 centerPlotId, uint256 radius) external view returns (NearbyAgent[] memory) {
+        (uint256 cx, uint256 cy) = worldMap.toCoords(centerPlotId);
+
+        // 先计算总数 (两次遍历: 1.计数 2.填充)
+        uint256 totalCount = 0;
+
+        // Bounds
+        uint256 xMin = cx > radius ? cx - radius : 0;
+        uint256 xMax = cx + radius < 999 ? cx + radius : 999;
+        uint256 yMin = cy > radius ? cy - radius : 0;
+        uint256 yMax = cy + radius < 999 ? cy + radius : 999;
+
+        // Pass 1: count
+        for (uint256 x = xMin; x <= xMax; x++) {
+            for (uint256 y = yMin; y <= yMax; y++) {
+                // Manhattan distance filter
+                uint256 dx = x > cx ? x - cx : cx - x;
+                uint256 dy = y > cy ? y - cy : cy - y;
+                if (dx + dy > radius) continue;
+
+                uint256 pid = x * 1000 + y;
+                uint256[] memory agents = economy.getPlotAgents(pid);
+                totalCount += agents.length;
+            }
+        }
+
+        // Pass 2: fill
+        NearbyAgent[] memory result = new NearbyAgent[](totalCount);
+        uint256 idx = 0;
+
+        for (uint256 x = xMin; x <= xMax; x++) {
+            for (uint256 y = yMin; y <= yMax; y++) {
+                uint256 dx = x > cx ? x - cx : cx - x;
+                uint256 dy = y > cy ? y - cy : cy - y;
+                if (dx + dy > radius) continue;
+
+                uint256 pid = x * 1000 + y;
+                uint256[] memory agents = economy.getPlotAgents(pid);
+
+                for (uint256 a = 0; a < agents.length; a++) {
+                    uint256 tid = agents[a];
+                    result[idx] = NearbyAgent({
+                        tokenId: tid,
+                        locationX: x,
+                        locationY: y,
+                        distance: dx + dy,
+                        currentEnergy: behavior.getCurrentEnergy(tid),
+                        owner: core.ownerOf(tid),
+                        gender: core.getGender(tid),
+                        status: death.agentStatus(tid),
+                        lockedBalance: dnagold.lockedBalance(tid)
+                    });
+                    idx++;
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /* ========== 3. canExecute ========== */
+
+    /**
+     * @notice 验证行动可行性（不执行）
+     * @param agentId  执行者
+     * @param action   行动名: "gather","eat","move","reproduce","raid","share","teach","rescue"
+     * @param targetId 目标 (move=目标plotId, reproduce/raid/share/teach/rescue=目标agentId, gather/eat=0)
+     * @return ok      是否可执行
+     * @return reason  不可执行原因
+     */
+    function canExecute(uint256 agentId, string calldata action, uint256 targetId) external view returns (bool ok, string memory reason) {
+        // Dead check
+        if (death.agentStatus(agentId) == 1) return (false, "agent is dead");
+        if (death.isEffectivelyDead(agentId)) return (false, "agent is effectively dead");
+
+        uint256 energy = behavior.getCurrentEnergy(agentId);
+
+        bytes32 actionHash = keccak256(bytes(action));
+
+        if (actionHash == keccak256("gather")) {
+            return _canGather(agentId, energy);
+        } else if (actionHash == keccak256("eat")) {
+            return _canEat(agentId, energy);
+        } else if (actionHash == keccak256("move")) {
+            return _canMove(agentId, energy, targetId);
+        } else if (actionHash == keccak256("reproduce")) {
+            return _canReproduce(agentId, energy, targetId);
+        } else if (actionHash == keccak256("raid")) {
+            return _canRaid(agentId, energy, targetId);
+        } else if (actionHash == keccak256("share")) {
+            return _canShare(agentId, targetId);
+        } else if (actionHash == keccak256("teach")) {
+            return _canTeach(agentId, energy, targetId);
+        } else if (actionHash == keccak256("rescue")) {
+            return _canRescue(agentId, targetId);
+        } else {
+            return (false, "unknown action");
+        }
+    }
+
+    /* ========== canExecute helpers ========== */
+
+    function _canGather(uint256 id, uint256 energy) internal view returns (bool, string memory) {
+        if (energy < 1) return (false, "insufficient energy");
+        if (_cooldownLeft(behavior.lastGatherBlock(id), behavior.GATHER_COOLDOWN()) > 0)
+            return (false, "gather cooldown active");
+        return (true, "");
+    }
+
+    function _canEat(uint256 id, uint256 /* energy */) internal view returns (bool, string memory) {
+        if (_cooldownLeft(core.lastEatBlock(id), behavior.EAT_COOLDOWN()) > 0)
+            return (false, "eat cooldown active");
+        uint256 locked = dnagold.lockedBalance(id);
+        if (locked < behavior.EAT_COST()) return (false, "insufficient locked gold for eat");
+        return (true, "");
+    }
+
+    function _canMove(uint256 id, uint256 energy, uint256 targetPlot) internal view returns (bool, string memory) {
+        if (energy < behavior.MOVE_ENERGY_COST()) return (false, "insufficient energy for move");
+        if (_cooldownLeft(behavior.lastMoveBlock(id), behavior.MOVE_COOLDOWN()) > 0)
+            return (false, "move cooldown active");
+        if (!worldMap.agentOnMap(id)) return (false, "agent not on map");
+        uint256 curPlot = worldMap.agentLocation(id);
+        uint256 dist = worldMap.getManhattanDistance(curPlot, targetPlot);
+        if (dist != 1) return (false, "target not adjacent (distance != 1)");
+        return (true, "");
+    }
+
+    function _canReproduce(uint256 id, uint256 energy, uint256 partnerId) internal view returns (bool, string memory) {
+        if (energy < behavior.REPRODUCE_ENERGY_MIN()) return (false, "insufficient energy for reproduce");
+        if (_cooldownLeft(behavior.lastReproduceBlock(id), behavior.REPRODUCE_COOLDOWN()) > 0)
+            return (false, "reproduce cooldown active");
+
+        // Gender
+        uint8 g1 = core.getGender(id);
+        uint8 g2 = core.getGender(partnerId);
+        if (g1 == g2) return (false, "same gender");
+
+        // Distance
+        uint256 p1 = worldMap.agentLocation(id);
+        uint256 p2 = worldMap.agentLocation(partnerId);
+        uint256 dist = worldMap.getManhattanDistance(p1, p2);
+        if (dist > 5) return (false, "too far (distance > 5)");
+
+        // Gold
+        uint256 gold = dnagold.lockedBalance(id);
+        if (gold < behavior.REPRODUCE_GOLD_COST()) return (false, "insufficient locked gold");
+
+        // Relatives
+        if (family.isDirectRelative(id, partnerId)) return (false, "is relative");
+
+        // Host capacity
+        address owner = core.ownerOf(id);
+        if (core.balanceOf(owner) >= behavior.MAX_AGENTS_PER_HOST()) return (false, "host full");
+
+        // Reproduce limit
+        (uint16[8] memory attrs, ) = core.getAttributes(id);
+        uint256 limit = uint256(attrs[7]) / 32;
+        if (core.reproduceCount(id) >= limit) return (false, "reproduce limit reached");
+
+        return (true, "");
+    }
+
+    function _canRaid(uint256 id, uint256 energy, uint256 targetId) internal view returns (bool, string memory) {
+        if (energy < behavior.RAID_MIN_ENERGY()) return (false, "insufficient energy for raid");
+        if (_cooldownLeft(behavior.lastRaidBlock(id), behavior.RAID_COOLDOWN()) > 0)
+            return (false, "raid cooldown active");
+
+        uint256 p1 = worldMap.agentLocation(id);
+        uint256 p2 = worldMap.agentLocation(targetId);
+        uint256 dist = worldMap.getManhattanDistance(p1, p2);
+        if (dist > 3) return (false, "too far (distance > 3)");
+
+        address o1 = core.ownerOf(id);
+        address o2 = core.ownerOf(targetId);
+        if (o1 == o2) return (false, "same owner");
+
+        return (true, "");
+    }
+
+    function _canShare(uint256 id, uint256 targetId) internal view returns (bool, string memory) {
+        if (_cooldownLeft(behavior.lastShareBlock(id), behavior.SHARE_COOLDOWN()) > 0)
+            return (false, "share cooldown active");
+
+        uint256 p1 = worldMap.agentLocation(id);
+        uint256 p2 = worldMap.agentLocation(targetId);
+        uint256 dist = worldMap.getManhattanDistance(p1, p2);
+        if (dist > 10) return (false, "too far (distance > 10)");
+
+        return (true, "");
+    }
+
+    function _canTeach(uint256 id, uint256 energy, uint256 childId) internal view returns (bool, string memory) {
+        if (energy < behavior.TEACH_MIN_ENERGY()) return (false, "insufficient energy for teach");
+        if (_cooldownLeft(behavior.parentTeachBlock(id), behavior.TEACH_COOLDOWN()) > 0)
+            return (false, "teach cooldown active");
+        if (!family.isDirectRelative(id, childId)) return (false, "not parent-child");
+
+        return (true, "");
+    }
+
+    function _canRescue(uint256 id, uint256 targetId) internal view returns (bool, string memory) {
+        // Target must be in dying window
+        if (!death.inDyingWindow(targetId)) return (false, "target not in dying window");
+
+        // Distance
+        uint256 p1 = worldMap.agentLocation(id);
+        uint256 p2 = worldMap.agentLocation(targetId);
+        uint256 dist = worldMap.getManhattanDistance(p1, p2);
+        if (dist > 10) return (false, "too far (distance > 10)");
+
+        // Rescuer gold
+        uint256 locked = dnagold.lockedBalance(id);
+        if (locked < behavior.RESCUE_COST()) return (false, "insufficient locked gold for rescue");
+
+        return (true, "");
+    }
+
+    /* ========== INTERNAL: cooldown helper ========== */
+
+    function _cooldownLeft(uint256 lastBlock, uint256 cooldown) internal view returns (uint256) {
+        if (lastBlock == 0) return 0; // never executed
+        uint256 readyAt = lastBlock + cooldown;
+        if (block.number >= readyAt) return 0;
+        return readyAt - block.number;
+    }
+
+    /* ========== UTILITY: world stats ========== */
+
+    function getWorldStats() external view returns (
+        uint256 totalGenesis,
+        uint256 totalTokens,
+        uint256 totalLiving,
+        uint256 totalBorn,
+        uint256 halvingCount_,
+        uint256 baseYield,
+        uint256 dilutionFactor
+    ) {
+        totalGenesis   = core.totalGenesisCount();
+        totalTokens    = core.totalTokenCount();
+        totalLiving    = economy.totalLivingAgents();
+        totalBorn      = economy.totalBornAgents();
+        halvingCount_  = economy.halvingCount();
+        baseYield      = economy.getCurrentBaseYield();
+        dilutionFactor = economy.getGlobalDilutionFactor();
+    }
+}
+
+// ========== BehaviorEngine.sol ==========
+
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+/**
+ * @title BehaviorEngine
+ * @notice CodeDNA 核心行为合约 — 8 大行为 + 能量计算 + 死亡判定
+ */
+
+/* ========== INTERFACES ========== */
+
+interface IBEDNAGold {
+    function addLocked(uint256 agentId, uint256 amount) external;
+    function spendLocked(uint256 agentId, uint256 amount) external;
+    function burnLocked(uint256 agentId) external;
+    function transferLocked(uint256 fromAgent, uint256 toAgent, uint256 amount) external;
+    function mintFree(address to, uint256 amount) external;
+    function lockedBalance(uint256 agentId) external view returns (uint256);
+    function balanceOf(address account) external view returns (uint256);
+}
+
+interface IBEGenesisCore {
+    function ownerOf(uint256 tokenId) external view returns (address);
+    function balanceOf(address owner) external view returns (uint256);
+    function getAttributes(uint256 tokenId) external view returns (uint16[8] memory attrs, uint8 gender);
+    function getGenes(uint256 tokenId) external view returns (uint8[23] memory);
+    function getGender(uint256 tokenId) external view returns (uint8);
+    function getEffectiveAttribute(uint256 tokenId, uint8 attrIdx) external view returns (uint16);
+    function getDNAAttribute(uint256 tokenId, uint8 attrIdx) external view returns (uint16);
+    function agentEnergy(uint256 tokenId) external view returns (uint256);
+    function lastEatBlock(uint256 tokenId) external view returns (uint256);
+    function agentAttributeBonus(uint256 tokenId, uint256 idx) external view returns (uint16);
+    function reproduceCount(uint256 tokenId) external view returns (uint256);
+    function setEnergy(uint256 tokenId, uint256 energy) external;
+    function setLastEatBlock(uint256 tokenId, uint256 blockNum) external;
+    function incrementReproduceCount(uint256 tokenId) external;
+    function addAttributeBonus(uint256 tokenId, uint8 attrIdx, uint16 bonus) external;
+    function mintOffspring(address to, uint256 fatherId, uint256 motherId) external returns (uint256);
+    function markDead(uint256 tokenId) external;
+}
+
+interface IBEWorldMap {
+    function moveAgent(uint256 agentId, uint256 newX, uint256 newY) external;
+    function agentLocation(uint256 agentId) external view returns (uint256);
+    function agentOnMap(uint256 agentId) external view returns (bool);
+    function getManhattanDistance(uint256 a, uint256 b) external pure returns (uint256);
+    function getPlotMultiplier(uint256 plotId) external pure returns (uint256);
+    function plotAgentCount(uint256 plotId) external view returns (uint256);
+    function removeAgent(uint256 agentId) external;
+    function placeAgent(uint256 agentId, uint256 x, uint256 y) external;
+    function toCoords(uint256 plotId) external pure returns (uint256 x, uint256 y);
+}
+
+interface IBEEconomy {
+    function calcGatherYield(uint256 agentId, uint256 plotId, uint256 plotCount, bool isLeader) external view returns (uint256);
+    function rewardAgent(uint256 agentId, uint256 totalAmount) external;
+    function checkAndHalve() external;
+    function incrementBorn() external;
+    function incrementLiving() external;
+    function decrementLiving() external;
+    function getPlotLeader(uint256 plotId) external view returns (uint256);
+    function addAgentToPlot(uint256 agentId, uint256 plotId) external;
+    function removeAgentFromPlot(uint256 agentId, uint256 plotId) external;
+    function moveAgentPlot(uint256 agentId, uint256 fromPlot, uint256 toPlot) external;
+}
+
+interface IBEFamily {
+    function isDirectRelative(uint256 a, uint256 b) external view returns (bool);
+    function registerGenesis(uint256 tokenId) external;
+    function registerBirth(uint256 childId, uint256 fatherId, uint256 motherId) external;
+    function removeAgent(uint256 tokenId) external;
+    function registered(uint256 tokenId) external view returns (bool);
+}
+
+contract BehaviorEngine {
+
+    /* ========== CONSTANTS ========== */
+
+    uint256 public constant GATHER_COOLDOWN       = 4_800;
+    uint256 public constant EAT_COOLDOWN          = 9_600;
+    uint256 public constant MOVE_COOLDOWN         = 300;
+    uint256 public constant REPRODUCE_COOLDOWN    = 201_600;
+    uint256 public constant RAID_COOLDOWN         = 14_400;
+    uint256 public constant SHARE_COOLDOWN        = 2_400;
+    uint256 public constant TEACH_COOLDOWN        = 403_200;
+    uint256 public constant DYING_WINDOW          = 14_400;
+    uint256 public constant ENERGY_DECAY_PERIOD   = 9_600;
+    uint256 public constant ENERGY_DECAY_AMOUNT   = 10;
+    uint256 public constant ENERGY_WEAK_THRESHOLD = 20;
+    uint256 public constant ENERGY_MAX_BASE       = 100;
+    uint256 public constant RESCUE_COST           = 100 * 1e18;
+    uint256 public constant RESCUE_REWARD         = 80 * 1e18;
+    uint256 public constant RESCUE_ENERGY_TO      = 30;
+    uint256 public constant EAT_COST              = 10 * 1e18;
+    uint256 public constant EAT_RESTORE           = 25;
+    uint256 public constant GATHER_RESTORE        = 35;
+    uint256 public constant MOVE_ENERGY_COST      = 5;
+    uint256 public constant REPRODUCE_ENERGY_MIN  = 60;
+    uint256 public constant REPRODUCE_GOLD_COST   = 200 * 1e18;
+    uint256 public constant REPRODUCE_GOLD_REWARD = 250 * 1e18;
+    uint256 public constant REPRODUCE_ENERGY_COST = 30;
+    uint256 public constant RAID_MIN_ENERGY       = 40;
+    uint256 public constant RAID_LOOT_RATIO       = 30;
+    uint256 public constant TEACH_BONUS           = 300 * 1e18;
+    uint256 public constant TEACH_ENERGY_COST     = 25;
+    uint256 public constant TEACH_MIN_ENERGY      = 30;
+    uint256 public constant TEACH_MAX_BONUS       = 20;
+    uint256 public constant DEATH_BOUNTY          = 50 * 1e18;
+    uint256 public constant MAX_AGENTS_PER_HOST   = 20;
+    uint256 public constant EXPLORE_BONUS_AMT     = 200 * 1e18;
+    uint256 public constant EXPLORE_WINDOW        = 28_800;
+    uint256 public constant EXPLORE_LIMIT         = 10;
+
+    /* ========== STATE ========== */
+
+    IBEDNAGold    public immutable dnagold;
+    IBEGenesisCore public immutable core;
+    IBEWorldMap   public immutable worldMap;
+    IBEEconomy    public immutable economy;
+    IBEFamily     public immutable family;
+
+    bool public paused;
+    address public immutable multisig;
+
+    // Cooldown tracking
+    mapping(uint256 => uint256) public lastGatherBlock;
+    mapping(uint256 => uint256) public lastMoveBlock;
+    mapping(uint256 => uint256) public lastReproduceBlock;
+    mapping(uint256 => uint256) public lastRaidBlock;
+    mapping(uint256 => uint256) public lastShareBlock;
+    mapping(uint256 => uint256) public parentTeachBlock;
+    mapping(bytes32 => uint256) public pairTeachBlock;
+
+    // Death tracking
+    mapping(uint256 => bool) public formallyDead;
+
+
+
+    /* ========== EVENTS ========== */
+
+    event Gathered(uint256 indexed agentId, uint256 yield);
+    event Ate(uint256 indexed agentId, uint256 energyAfter);
+    event Moved(uint256 indexed agentId, uint256 fromPlot, uint256 toPlot);
+    event Reproduced(uint256 indexed fatherId, uint256 indexed motherId, uint256 childId, address childOwner);
+    event RaidResult(uint256 indexed attackerId, uint256 indexed targetId, uint8 result, uint256 loot);
+    event Shared(uint256 indexed fromId, uint256 indexed toId, uint256 amount);
+    event Taught(uint256 indexed parentId, uint256 indexed childId, uint8 attrIdx);
+    event Rescued(uint256 indexed rescuerId, uint256 indexed targetId);
+    event AgentDied(uint256 indexed agentId, uint256 burnedGold);
+    event BountyPaid(uint256 indexed agentId, address indexed hunter, uint256 bounty);
+    event SystemPaused(uint256 blockNumber);
+    event SystemUnpaused(uint256 blockNumber);
+
+    /* ========== ERRORS ========== */
+
+    error Paused();
+    error NotMultisig();
+    error CooldownActive(string action, uint256 readyAt);
+    error InsufficientEnergy(uint256 have, uint256 need);
+    error AgentIsDead(uint256 agentId);
+    error NotOwner(uint256 agentId, address caller);
+
+    event AgentPlaced(uint256 indexed agentId, uint256 x, uint256 y);
+    error NotDead(uint256 agentId);
+    error SameGender();
+    error TooFar(uint256 distance, uint256 maxDist);
+    error InsufficientGold(uint256 have, uint256 need);
+    error IsRelative();
+    error HostFull(address host, uint256 count);
+    error ReproduceLimit(uint256 agentId);
+    error SameOwner();
+    error TargetWeakened();
+    error InvalidAttribute(uint8 idx);
+    error NotParentChild();
+    error TeachBonusMaxed(uint256 tokenId, uint8 attrIdx);
+
+    /* ========== MODIFIERS ========== */
+
+    modifier whenNotPaused() {
+        if (paused) revert Paused();
+        _;
+    }
+
+    modifier notDead(uint256 id) {
+        if (formallyDead[id]) revert AgentIsDead(id);
+        if (_isEffectivelyDead(id)) {
+            _formallyDie(id);
+            revert AgentIsDead(id);
+        }
+        _;
+    }
+
+    /* ========== CONSTRUCTOR ========== */
+
+    constructor(
+        address _dnagold,
+        address _core,
+        address _worldMap,
+        address _economy,
+        address _family,
+        address _multisig
+    ) {
+        dnagold  = IBEDNAGold(_dnagold);
+        core     = IBEGenesisCore(_core);
+        worldMap = IBEWorldMap(_worldMap);
+        economy  = IBEEconomy(_economy);
+        family   = IBEFamily(_family);
+        multisig = _multisig;
+    }
+
+    /* ========== PAUSE ========== */
+
+    function pause() external {
+        if (msg.sender != multisig) revert NotMultisig();
+        paused = true;
+        emit SystemPaused(block.number);
+    }
+
+    function unpause() external {
+        if (msg.sender != multisig) revert NotMultisig();
+        paused = false;
+        emit SystemUnpaused(block.number);
+    }
+
+    /* ========== ENERGY (view, zero gas) ========== */
+
+    function getCurrentEnergy(uint256 id) public view returns (uint256) {
+        if (formallyDead[id]) return 0;
+        uint256 base = core.agentEnergy(id);
+        uint256 lastEat = core.lastEatBlock(id);
+        if (lastEat == 0) return 0;
+
+        uint256 periods = (block.number - lastEat) / ENERGY_DECAY_PERIOD;
+        uint256 decay = periods * ENERGY_DECAY_AMOUNT;
+        return decay >= base ? 0 : base - decay;
+    }
+
+    function isEffectivelyDead(uint256 id) public view returns (bool) {
+        return _isEffectivelyDead(id);
+    }
+
+    function _isEffectivelyDead(uint256 id) internal view returns (bool) {
+        if (formallyDead[id]) return true;
+        uint256 lastEat = core.lastEatBlock(id);
+        if (lastEat == 0) return false; // never minted
+
+        uint256 base = core.agentEnergy(id);
+        if (base == 0 && lastEat == 0) return false;
+
+        if (getCurrentEnergy(id) > 0) return false;
+
+        // Energy hit zero at: lastEat + (base / ENERGY_DECAY_AMOUNT) * ENERGY_DECAY_PERIOD
+        uint256 zeroAt = lastEat + (base / ENERGY_DECAY_AMOUNT) * ENERGY_DECAY_PERIOD;
+        return block.number > zeroAt + DYING_WINDOW;
+    }
+
+    function _getMaxEnergy(uint256 id) internal view returns (uint256) {
+        (uint16[8] memory attrs, ) = core.getAttributes(id);
+        uint256 lifespan = uint256(attrs[6]); // 0-255
+        // +0 to +25 based on LIFESPAN
+        return ENERGY_MAX_BASE + (lifespan * 25 / 255);
+    }
+
+    function _clampEnergy(uint256 id, uint256 energy) internal view returns (uint256) {
+        uint256 maxE = _getMaxEnergy(id);
+        return energy > maxE ? maxE : energy;
+    }
+
+    /* ========== FORMAL DEATH ========== */
+
+    function _formallyDie(uint256 id) internal {
+        if (formallyDead[id]) return;
+        formallyDead[id] = true;
+
+        uint256 burned = dnagold.lockedBalance(id);
+        dnagold.burnLocked(id);
+        core.markDead(id);
+
+        // WorldMap: removeAgent is safe (no-ops if not on map)
+        uint256 plotId = worldMap.agentLocation(id);
+        worldMap.removeAgent(id);
+        economy.removeAgentFromPlot(id, plotId);
+        economy.decrementLiving();
+
+        // FamilyTracker: try-catch because agent might not be registered
+        try family.removeAgent(id) {} catch {}
+
+        emit AgentDied(id, burned);
+    }
+
+    /**
+     * @notice 任何人可调用 checkDeath 触发正式死亡
+     */
+    function checkDeath(uint256 id) external whenNotPaused {
+        if (formallyDead[id]) return;
+        if (_isEffectivelyDead(id)) {
+            _formallyDie(id);
+        }
+    }
+
+    /**
+     * @notice 赏金猎人主动触发死亡并领取赏金
+     */
+    function claimDeathBounty(uint256 id) external whenNotPaused {
+        if (formallyDead[id]) revert AgentIsDead(id);
+        if (!_isEffectivelyDead(id)) revert NotDead(id);
+
+        _formallyDie(id);
+        economy.rewardAgent(id, 0); // 不再给已死Agent，赏金给猎人
+
+        // 赏金直接从奖励池发给调用者
+        // 用 economy.rewardAgent 会发给 NFT owner，这里要发给 msg.sender
+        // 直接调用 dnagold.mintFree
+        dnagold.mintFree(msg.sender, DEATH_BOUNTY);
+
+        emit BountyPaid(id, msg.sender, DEATH_BOUNTY);
+    }
+
+    /* ========== 0. PLACE ON MAP (first time only) ========== */
+
+    /**
+     * @notice Agent 宿主将 Agent 放置到世界地图上（仅首次，之后用 move）
+     * @dev 任何人可为自己持有的 Agent 调用
+     */
+    function placeOnMap(uint256 agentId, uint256 x, uint256 y) external whenNotPaused notDead(agentId) {
+        // Must own the agent
+        if (core.ownerOf(agentId) != msg.sender) revert NotOwner(agentId, msg.sender);
+
+        // Place on map (WorldMap checks AlreadyOnMap internally)
+        worldMap.placeAgent(agentId, x, y);
+
+        // Register in economy plot tracking
+        uint256 plotId = x * 1000 + y;
+        economy.addAgentToPlot(agentId, plotId);
+
+        // Register genesis in family tracker (if not already registered)
+        if (!family.registered(agentId)) {
+            family.registerGenesis(agentId);
+        }
+
+        // Increment living population
+        economy.incrementLiving();
+
+        emit AgentPlaced(agentId, x, y);
+    }
+
+    /* ========== 1. GATHER ========== */
+
+    function gather(uint256 agentId) external whenNotPaused notDead(agentId) {
+        // Cooldown
+        if (block.number < lastGatherBlock[agentId] + GATHER_COOLDOWN) {
+            revert CooldownActive("gather", lastGatherBlock[agentId] + GATHER_COOLDOWN);
+        }
+
+        // Energy >= 1
+        uint256 energy = getCurrentEnergy(agentId);
+        if (energy < 1) revert InsufficientEnergy(energy, 1);
+
+        // Calculate yield
+        uint256 plotId = worldMap.agentLocation(agentId);
+        uint256 plotCount = worldMap.plotAgentCount(plotId);
+        uint256 leader = economy.getPlotLeader(plotId);
+        bool isLeader = (leader == agentId);
+
+        uint256 yield_ = economy.calcGatherYield(agentId, plotId, plotCount, isLeader);
+
+        // Update cooldown
+        lastGatherBlock[agentId] = block.number;
+
+        // Restore energy (+35, capped)
+        uint256 newEnergy = _clampEnergy(agentId, energy + GATHER_RESTORE);
+        core.setEnergy(agentId, newEnergy);
+        core.setLastEatBlock(agentId, block.number);
+
+        // Reward
+        if (yield_ > 0) {
+            economy.rewardAgent(agentId, yield_);
+        }
+
+        // Check halving
+        economy.checkAndHalve();
+
+        emit Gathered(agentId, yield_);
+    }
+
+    /* ========== 2. EAT ========== */
+
+    function eat(uint256 agentId) external whenNotPaused notDead(agentId) {
+        uint256 lastEat = core.lastEatBlock(agentId);
+        if (block.number < lastEat + EAT_COOLDOWN) {
+            revert CooldownActive("eat", lastEat + EAT_COOLDOWN);
+        }
+
+        uint256 locked = dnagold.lockedBalance(agentId);
+        if (locked < EAT_COST) revert InsufficientGold(locked, EAT_COST);
+
+        // Spend 10 tokens (burned)
+        dnagold.spendLocked(agentId, EAT_COST);
+
+        // Restore energy
+        uint256 energy = getCurrentEnergy(agentId);
+        uint256 newEnergy = _clampEnergy(agentId, energy + EAT_RESTORE);
+        core.setEnergy(agentId, newEnergy);
+        core.setLastEatBlock(agentId, block.number);
+
+        emit Ate(agentId, newEnergy);
+    }
+
+    /* ========== 3. MOVE ========== */
+
+    function move(uint256 agentId, uint256 newX, uint256 newY) external whenNotPaused notDead(agentId) {
+        if (block.number < lastMoveBlock[agentId] + MOVE_COOLDOWN) {
+            revert CooldownActive("move", lastMoveBlock[agentId] + MOVE_COOLDOWN);
+        }
+
+        uint256 energy = getCurrentEnergy(agentId);
+        if (energy < MOVE_ENERGY_COST) revert InsufficientEnergy(energy, MOVE_ENERGY_COST);
+
+        uint256 oldPlot = worldMap.agentLocation(agentId);
+        uint256 newPlot = newX * 1000 + newY;
+        uint256 dist = worldMap.getManhattanDistance(oldPlot, newPlot);
+        if (dist != 1) revert TooFar(dist, 1);
+
+        // Deduct energy
+        uint256 newEnergy = energy - MOVE_ENERGY_COST;
+        core.setEnergy(agentId, newEnergy);
+        core.setLastEatBlock(agentId, block.number);
+
+        // Move on map (includes explore reward check)
+        worldMap.moveAgent(agentId, newX, newY);
+        economy.moveAgentPlot(agentId, oldPlot, newPlot);
+
+        lastMoveBlock[agentId] = block.number;
+
+        emit Moved(agentId, oldPlot, newPlot);
+    }
+
+    /* ========== 4. REPRODUCE ========== */
+
+    function reproduce(uint256 fatherId, uint256 motherId) external whenNotPaused notDead(fatherId) notDead(motherId) {
+        // Gender check
+        uint8 fGender = core.getGender(fatherId);
+        uint8 mGender = core.getGender(motherId);
+        if (fGender == mGender) revert SameGender();
+        // Ensure father is male(1), mother is female(0) — swap if needed
+        if (fGender == 0 && mGender == 1) {
+            (fatherId, motherId) = (motherId, fatherId);
+        } else if (fGender != 1 || mGender != 0) {
+            revert SameGender();
+        }
+
+        // Distance <= 5
+        uint256 fPlot = worldMap.agentLocation(fatherId);
+        uint256 mPlot = worldMap.agentLocation(motherId);
+        uint256 dist = worldMap.getManhattanDistance(fPlot, mPlot);
+        if (dist > 5) revert TooFar(dist, 5);
+
+        // Energy >= 60 each
+        uint256 fEnergy = getCurrentEnergy(fatherId);
+        uint256 mEnergy = getCurrentEnergy(motherId);
+        if (fEnergy < REPRODUCE_ENERGY_MIN) revert InsufficientEnergy(fEnergy, REPRODUCE_ENERGY_MIN);
+        if (mEnergy < REPRODUCE_ENERGY_MIN) revert InsufficientEnergy(mEnergy, REPRODUCE_ENERGY_MIN);
+
+        // Gold >= 200 each
+        uint256 fGold = dnagold.lockedBalance(fatherId);
+        uint256 mGold = dnagold.lockedBalance(motherId);
+        if (fGold < REPRODUCE_GOLD_COST) revert InsufficientGold(fGold, REPRODUCE_GOLD_COST);
+        if (mGold < REPRODUCE_GOLD_COST) revert InsufficientGold(mGold, REPRODUCE_GOLD_COST);
+
+        // Not relatives
+        if (family.isDirectRelative(fatherId, motherId)) revert IsRelative();
+
+        // Host capacity < 20 (strict less than)
+        address fOwner = core.ownerOf(fatherId);
+        address mOwner = core.ownerOf(motherId);
+        if (core.balanceOf(fOwner) >= MAX_AGENTS_PER_HOST) revert HostFull(fOwner, core.balanceOf(fOwner));
+        if (core.balanceOf(mOwner) >= MAX_AGENTS_PER_HOST) revert HostFull(mOwner, core.balanceOf(mOwner));
+
+        // Cooldown
+        if (block.number < lastReproduceBlock[fatherId] + REPRODUCE_COOLDOWN) {
+            revert CooldownActive("reproduce_father", lastReproduceBlock[fatherId] + REPRODUCE_COOLDOWN);
+        }
+        if (block.number < lastReproduceBlock[motherId] + REPRODUCE_COOLDOWN) {
+            revert CooldownActive("reproduce_mother", lastReproduceBlock[motherId] + REPRODUCE_COOLDOWN);
+        }
+
+        // Lifetime limit: FERTILITY / 32
+        {
+            (uint16[8] memory fAttrs, ) = core.getAttributes(fatherId);
+            (uint16[8] memory mAttrs, ) = core.getAttributes(motherId);
+            uint256 fLimit = uint256(fAttrs[7]) / 32;
+            uint256 mLimit = uint256(mAttrs[7]) / 32;
+            if (core.reproduceCount(fatherId) >= fLimit) revert ReproduceLimit(fatherId);
+            if (core.reproduceCount(motherId) >= mLimit) revert ReproduceLimit(motherId);
+        }
+
+        // === Execute ===
+
+        // Spend gold (burned for deflation)
+        dnagold.spendLocked(fatherId, REPRODUCE_GOLD_COST);
+        dnagold.spendLocked(motherId, REPRODUCE_GOLD_COST);
+
+        // Deduct energy
+        fEnergy -= REPRODUCE_ENERGY_COST;
+        mEnergy -= REPRODUCE_ENERGY_COST;
+
+        // Determine child owner: block.prevrandao % 2
+        address childOwner = (block.prevrandao % 2 == 0) ? fOwner : mOwner;
+
+        // Mint offspring (DNA generation happens inside GenesisCore)
+        uint256 childId = core.mintOffspring(childOwner, fatherId, motherId);
+
+        // Place child at midpoint
+        {
+            (uint256 fx, uint256 fy) = worldMap.toCoords(fPlot);
+            (uint256 mx, uint256 my) = worldMap.toCoords(mPlot);
+            uint256 cx = (fx + mx) / 2;
+            uint256 cy = (fy + my) / 2;
+            worldMap.placeAgent(childId, cx, cy);
+            uint256 childPlot = cx * 1000 + cy;
+            economy.addAgentToPlot(childId, childPlot);
+        }
+
+        // Register birth in family tracker
+        family.registerBirth(childId, fatherId, motherId);
+
+        // Rewards: +250 locked each, +10 energy each
+        economy.rewardAgent(fatherId, REPRODUCE_GOLD_REWARD);
+        economy.rewardAgent(motherId, REPRODUCE_GOLD_REWARD);
+        fEnergy += 10;
+        mEnergy += 10;
+
+        // Clamp and save energy
+        core.setEnergy(fatherId, _clampEnergy(fatherId, fEnergy));
+        core.setLastEatBlock(fatherId, block.number);
+        core.setEnergy(motherId, _clampEnergy(motherId, mEnergy));
+        core.setLastEatBlock(motherId, block.number);
+
+        // Update reproduce tracking
+        lastReproduceBlock[fatherId] = block.number;
+        lastReproduceBlock[motherId] = block.number;
+        core.incrementReproduceCount(fatherId);
+        core.incrementReproduceCount(motherId);
+
+        // Population
+        economy.incrementBorn();
+
+        emit Reproduced(fatherId, motherId, childId, childOwner);
+    }
+
+    /* ========== 5. RAID ========== */
+
+    function raid(uint256 attackerId, uint256 targetId) external whenNotPaused notDead(attackerId) notDead(targetId) {
+        // Cooldown
+        if (block.number < lastRaidBlock[attackerId] + RAID_COOLDOWN) {
+            revert CooldownActive("raid", lastRaidBlock[attackerId] + RAID_COOLDOWN);
+        }
+
+        // Energy >= 40
+        uint256 atkEnergy = getCurrentEnergy(attackerId);
+        if (atkEnergy < RAID_MIN_ENERGY) revert InsufficientEnergy(atkEnergy, RAID_MIN_ENERGY);
+
+        // Target not weakened (energy > ENERGY_WEAK_THRESHOLD to avoid kicking downed agents)
+        uint256 tgtEnergy = getCurrentEnergy(targetId);
+
+        // Distance <= 3
+        uint256 atkPlot = worldMap.agentLocation(attackerId);
+        uint256 tgtPlot = worldMap.agentLocation(targetId);
+        uint256 dist = worldMap.getManhattanDistance(atkPlot, tgtPlot);
+        if (dist > 3) revert TooFar(dist, 3);
+
+        // Not same owner
+        address atkOwner = core.ownerOf(attackerId);
+        address tgtOwner = core.ownerOf(targetId);
+        if (atkOwner == tgtOwner) revert SameOwner();
+
+        // Battle calculation
+        (uint16[8] memory atkAttrs, ) = core.getAttributes(attackerId);
+        (uint16[8] memory tgtAttrs, ) = core.getAttributes(targetId);
+
+        uint256 atkPower = uint256(atkAttrs[2]) * (255 + uint256(atkAttrs[3])) / 255;
+        uint256 defBase  = uint256(tgtAttrs[2]) * 8 / 10;
+
+        uint256 rand = uint256(keccak256(abi.encodePacked(attackerId, targetId, block.prevrandao, block.number))) % 100;
+
+        // ±20% defense variation
+        uint256 defPower;
+        if (rand % 2 == 0) {
+            defPower = defBase + (defBase * (rand % 21) / 100);
+        } else {
+            uint256 reduction = defBase * (rand % 21) / 100;
+            defPower = defBase > reduction ? defBase - reduction : 0;
+        }
+
+        lastRaidBlock[attackerId] = block.number;
+
+        uint8 result;
+        uint256 loot = 0;
+
+        if (rand % 20 == 0) {
+            // Draw (5%)
+            result = 2;
+            atkEnergy = atkEnergy > 15 ? atkEnergy - 15 : 0;
+            tgtEnergy = tgtEnergy > 15 ? tgtEnergy - 15 : 0;
+        } else if (atkPower > defPower) {
+            // Attacker wins
+            result = 1;
+            loot = dnagold.lockedBalance(targetId) * RAID_LOOT_RATIO / 100;
+            if (loot > 0) {
+                dnagold.transferLocked(targetId, attackerId, loot);
+            }
+            atkEnergy = atkEnergy > 20 ? atkEnergy - 20 : 0;
+            tgtEnergy = tgtEnergy > 20 ? tgtEnergy - 20 : 0;
+        } else {
+            // Attacker loses
+            result = 0;
+            atkEnergy = atkEnergy > 30 ? atkEnergy - 30 : 0;
+            tgtEnergy = tgtEnergy > 10 ? tgtEnergy - 10 : 0;
+        }
+
+        core.setEnergy(attackerId, atkEnergy);
+        core.setLastEatBlock(attackerId, block.number);
+        core.setEnergy(targetId, tgtEnergy);
+        core.setLastEatBlock(targetId, block.number);
+
+        emit RaidResult(attackerId, targetId, result, loot);
+    }
+
+    /* ========== 6. SHARE ========== */
+
+    function share(uint256 fromId, uint256 toId, uint256 amount) external whenNotPaused notDead(fromId) {
+        // Cooldown
+        if (block.number < lastShareBlock[fromId] + SHARE_COOLDOWN) {
+            revert CooldownActive("share", lastShareBlock[fromId] + SHARE_COOLDOWN);
+        }
+
+        // Distance <= 10
+        uint256 fromPlot = worldMap.agentLocation(fromId);
+        uint256 toPlot   = worldMap.agentLocation(toId);
+        uint256 dist = worldMap.getManhattanDistance(fromPlot, toPlot);
+        if (dist > 10) revert TooFar(dist, 10);
+
+        // Gold check
+        uint256 locked = dnagold.lockedBalance(fromId);
+        if (locked < amount) revert InsufficientGold(locked, amount);
+
+        // Execute: transfer locked gold from sender to receiver
+        dnagold.transferLocked(fromId, toId, amount);
+
+        uint256 toEnergy = getCurrentEnergy(toId);
+        uint256 newEnergy = _clampEnergy(toId, toEnergy + 20);
+        core.setEnergy(toId, newEnergy);
+        core.setLastEatBlock(toId, block.number);
+
+        lastShareBlock[fromId] = block.number;
+
+        emit Shared(fromId, toId, amount);
+    }
+
+    /* ========== 7. TEACH ========== */
+
+    function teach(uint256 parentId, uint256 childId, uint8 attrIdx) external whenNotPaused notDead(parentId) notDead(childId) {
+        if (attrIdx >= 8) revert InvalidAttribute(attrIdx);
+
+        // Must be direct parent-child relationship
+        if (!family.isDirectRelative(parentId, childId)) revert NotParentChild();
+
+        // Parent overall cooldown (14 days) — only if parent has taught before
+        if (parentTeachBlock[parentId] > 0 && block.number < parentTeachBlock[parentId] + TEACH_COOLDOWN) {
+            revert CooldownActive("teach_parent", parentTeachBlock[parentId] + TEACH_COOLDOWN);
+        }
+
+        // Per-pair cooldown (14 days) — only if this pair has taught before
+        bytes32 pairKey = keccak256(abi.encodePacked(parentId, childId));
+        if (pairTeachBlock[pairKey] > 0 && block.number < pairTeachBlock[pairKey] + TEACH_COOLDOWN) {
+            revert CooldownActive("teach_pair", pairTeachBlock[pairKey] + TEACH_COOLDOWN);
+        }
+
+        // Parent energy >= 30
+        uint256 pEnergy = getCurrentEnergy(parentId);
+        if (pEnergy < TEACH_MIN_ENERGY) revert InsufficientEnergy(pEnergy, TEACH_MIN_ENERGY);
+
+        // Attribute bonus cap: < 20 total for this attribute
+        uint16 currentBonus = core.agentAttributeBonus(childId, attrIdx);
+        if (currentBonus >= TEACH_MAX_BONUS) revert TeachBonusMaxed(childId, attrIdx);
+
+        // Execute: parent energy -25
+        uint256 newEnergy = pEnergy - TEACH_ENERGY_COST;
+        core.setEnergy(parentId, newEnergy);
+        core.setLastEatBlock(parentId, block.number);
+
+        // Child attribute +5
+        core.addAttributeBonus(childId, attrIdx, 5);
+
+        // Update both cooldowns
+        parentTeachBlock[parentId] = block.number;
+        pairTeachBlock[pairKey] = block.number;
+
+        // Reward parent
+        economy.rewardAgent(parentId, TEACH_BONUS);
+
+        emit Taught(parentId, childId, attrIdx);
+    }
+
+    /* ========== 8. RESCUE ========== */
+
+    function rescue(uint256 rescuerId, uint256 targetId) external whenNotPaused notDead(rescuerId) {
+        // Target must be effectively dead (but not formally dead yet — within dying window)
+        // We need a different check: energy = 0 AND within dying window
+        if (formallyDead[targetId]) revert AgentIsDead(targetId);
+
+        // Check target energy is 0 but still within dying window
+        uint256 tgtEnergy = getCurrentEnergy(targetId);
+        if (tgtEnergy > 0) revert NotDead(targetId);
+
+        // Must still be within dying window (not effectively dead beyond window)
+        uint256 lastEat = core.lastEatBlock(targetId);
+        uint256 base = core.agentEnergy(targetId);
+        uint256 zeroAt = lastEat + (base / ENERGY_DECAY_AMOUNT) * ENERGY_DECAY_PERIOD;
+        // Must be: energy==0 AND block.number <= zeroAt + DYING_WINDOW
+        if (block.number > zeroAt + DYING_WINDOW) {
+            // Already past dying window — formally die instead
+            _formallyDie(targetId);
+            revert AgentIsDead(targetId);
+        }
+
+        // Distance <= 10
+        uint256 rPlot = worldMap.agentLocation(rescuerId);
+        uint256 tPlot = worldMap.agentLocation(targetId);
+        uint256 dist = worldMap.getManhattanDistance(rPlot, tPlot);
+        if (dist > 10) revert TooFar(dist, 10);
+
+        // Rescuer needs >= 100 locked gold
+        uint256 locked = dnagold.lockedBalance(rescuerId);
+        if (locked < RESCUE_COST) revert InsufficientGold(locked, RESCUE_COST);
+
+        // Execute
+        dnagold.spendLocked(rescuerId, RESCUE_COST);
+
+        // Target recovers to 30 energy, reset lastEatBlock
+        core.setEnergy(targetId, RESCUE_ENERGY_TO);
+        core.setLastEatBlock(targetId, block.number);
+
+        // Reward rescuer
+        economy.rewardAgent(rescuerId, RESCUE_REWARD);
+
+        emit Rescued(rescuerId, targetId);
+    }
+
+    /* ========== RECEIVE ========== */
+
+}
+// ========== DeathEngine.sol ==========
+
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+/**
+ * @title DeathEngine
+ * @notice CodeDNA 死亡引擎 — Agent 正式死亡处理、赏金猎人机制
+ *
+ * 职责:
+ *   1. agentStatus 生死状态管理
+ *   2. _formallyDie(): burn 锁定 gold → clear energy/eat/location → 人口扣减 → 家族扣减
+ *   3. checkDeath(): 任何人可触发正式死亡（无奖励纯维护）
+ *   4. claimDeathBounty(): 赏金猎人模式，触发死亡并领取 50 枚 DNAGOLD
+ *
+ * 执行顺序不可变: burn → markDead → removeFromMap → decrementLiving → decrementFamily
+ * (先 burn 再 delete，否则 lockedBalance 已清零找不到余额)
+ */
+
+/* ========== INTERFACES ========== */
+
+interface IDEDNAGold {
+    function lockedBalance(uint256 agentId) external view returns (uint256);
+    function burnLocked(uint256 agentId) external;
+    function mintFree(address to, uint256 amount) external;
+    function balanceOf(address account) external view returns (uint256);
+}
+
+interface IDEGenesisCore {
+    function agentEnergy(uint256 tokenId) external view returns (uint256);
+    function lastEatBlock(uint256 tokenId) external view returns (uint256);
+    function markDead(uint256 tokenId) external;
+    function ownerOf(uint256 tokenId) external view returns (address);
+}
+
+interface IDEWorldMap {
+    function agentLocation(uint256 agentId) external view returns (uint256);
+    function removeAgent(uint256 agentId) external;
+}
+
+interface IDEEconomy {
+    function removeAgentFromPlot(uint256 agentId, uint256 plotId) external;
+    function decrementLiving() external;
+    function rewardAgent(uint256 agentId, uint256 totalAmount) external;
+}
+
+interface IDEFamily {
+    function removeAgent(uint256 tokenId) external;
+    function registered(uint256 tokenId) external view returns (bool);
+}
+
+contract DeathEngine {
+
+    /* ========== ENUMS ========== */
+
+    enum Status { ALIVE, DEAD }
+
+    /* ========== CONSTANTS ========== */
+
+    uint256 public constant DYING_WINDOW        = 14_400;   // blocks — 12h@3s
+    uint256 public constant ENERGY_DECAY_PERIOD  = 9_600;    // blocks — 8h@3s
+    uint256 public constant ENERGY_DECAY_AMOUNT  = 10;
+    uint256 public constant DEATH_BOUNTY         = 50 * 1e18;
+
+    /* ========== STATE ========== */
+
+    IDEDNAGold    public immutable dnagold;
+    IDEGenesisCore public immutable core;
+    IDEWorldMap   public immutable worldMap;
+    IDEEconomy    public immutable economy;
+    IDEFamily     public immutable family;
+    address       public immutable gameContract; // BehaviorEngine
+
+    mapping(uint256 => Status) public agentStatus;
+
+    /* ========== EVENTS ========== */
+
+    event AgentDied(uint256 indexed agentId, uint256 burnedGold, uint256 blockNumber);
+    event BountyPaid(uint256 indexed agentId, address indexed hunter, uint256 bounty);
+
+    /* ========== ERRORS ========== */
+
+    error OnlyGame();
+    error AgentIsDead(uint256 agentId);
+    error AgentNotDead(uint256 agentId);
+
+    /* ========== MODIFIER ========== */
+
+    modifier onlyGame() {
+        if (msg.sender != gameContract) revert OnlyGame();
+        _;
+    }
+
+    /* ========== CONSTRUCTOR ========== */
+
+    constructor(
+        address _dnagold,
+        address _core,
+        address _worldMap,
+        address _economy,
+        address _family,
+        address _gameContract
+    ) {
+        dnagold      = IDEDNAGold(_dnagold);
+        core         = IDEGenesisCore(_core);
+        worldMap     = IDEWorldMap(_worldMap);
+        economy      = IDEEconomy(_economy);
+        family       = IDEFamily(_family);
+        gameContract = _gameContract;
+    }
+
+    /* ========== ENERGY VIEW (zero gas) ========== */
+
+    /**
+     * @notice 当前能量（考虑衰减）
+     */
+    function getCurrentEnergy(uint256 id) public view returns (uint256) {
+        if (agentStatus[id] == Status.DEAD) return 0;
+        uint256 base    = core.agentEnergy(id);
+        uint256 lastEat = core.lastEatBlock(id);
+        if (lastEat == 0) return 0;
+
+        uint256 periods = (block.number - lastEat) / ENERGY_DECAY_PERIOD;
+        uint256 decay   = periods * ENERGY_DECAY_AMOUNT;
+        return decay >= base ? 0 : base - decay;
+    }
+
+    /**
+     * @notice 是否处于事实死亡状态（能量归零 + 超出 dying window）
+     */
+    function isEffectivelyDead(uint256 id) public view returns (bool) {
+        if (agentStatus[id] == Status.DEAD) return true;
+        uint256 lastEat = core.lastEatBlock(id);
+        if (lastEat == 0) return false; // never minted
+
+        if (getCurrentEnergy(id) > 0) return false;
+
+        uint256 base   = core.agentEnergy(id);
+        uint256 zeroAt = lastEat + (base / ENERGY_DECAY_AMOUNT) * ENERGY_DECAY_PERIOD;
+        return block.number > zeroAt + DYING_WINDOW;
+    }
+
+    /**
+     * @notice 是否处于 dying window（能量=0 但仍可被 rescue）
+     */
+    function inDyingWindow(uint256 id) public view returns (bool) {
+        if (agentStatus[id] == Status.DEAD) return false;
+        if (getCurrentEnergy(id) > 0) return false;
+
+        uint256 lastEat = core.lastEatBlock(id);
+        if (lastEat == 0) return false;
+
+        uint256 base   = core.agentEnergy(id);
+        uint256 zeroAt = lastEat + (base / ENERGY_DECAY_AMOUNT) * ENERGY_DECAY_PERIOD;
+        return block.number <= zeroAt + DYING_WINDOW;
+    }
+
+    /* ========== FORMAL DEATH (internal) ========== */
+
+    /**
+     * @dev 执行顺序不可更改: burn → markDead → removeMap → decrementLiving → decrementFamily
+     *      burn MUST come before markDead (markDead zeroes energy/lastEatBlock)
+     */
+    function _formallyDie(uint256 id) internal {
+        if (agentStatus[id] == Status.DEAD) return; // idempotent
+
+        // 1. Burn ALL locked DNAGOLD (先读余额，再burn — burn后余额归零)
+        uint256 burned = dnagold.lockedBalance(id);
+        dnagold.burnLocked(id);
+
+        // 2. Clear energy/lastEatBlock in GenesisCore
+        core.markDead(id);
+
+        // 3. Remove from WorldMap + EconomyEngine plot tracking
+        uint256 plotId = worldMap.agentLocation(id);
+        worldMap.removeAgent(id);
+        economy.removeAgentFromPlot(id, plotId);
+
+        // 4. Decrement living population
+        economy.decrementLiving();
+
+        // 5. Decrement family headcount (try-catch: agent may not be registered)
+        try family.removeAgent(id) {} catch {}
+
+        // 6. Set status LAST (after all cleanup)
+        agentStatus[id] = Status.DEAD;
+
+        emit AgentDied(id, burned, block.number);
+    }
+
+    /* ========== PUBLIC: checkDeath (no reward, maintenance only) ========== */
+
+    /**
+     * @notice 任何人可调用，检查并执行正式死亡。无奖励。
+     */
+    function checkDeath(uint256 targetId) external {
+        if (agentStatus[targetId] == Status.DEAD) return; // already dead, no-op
+        if (isEffectivelyDead(targetId)) {
+            _formallyDie(targetId);
+        }
+    }
+
+    /* ========== PUBLIC: claimDeathBounty (with 50 DNAGOLD reward) ========== */
+
+    /**
+     * @notice 赏金猎人触发正式死亡并领取 50 枚 DNAGOLD
+     * @dev 奖励从游戏奖励池 mintFree 给 msg.sender，池空则静默跳过（不revert）
+     */
+    function claimDeathBounty(uint256 targetId) external {
+        if (agentStatus[targetId] == Status.DEAD) revert AgentIsDead(targetId);
+        if (!isEffectivelyDead(targetId)) revert AgentNotDead(targetId);
+
+        _formallyDie(targetId);
+
+        // 赏金: 检查奖励池余额，充足时发放，不足时静默跳过
+        uint256 poolBalance = dnagold.balanceOf(gameContract);
+        if (poolBalance >= DEATH_BOUNTY) {
+            dnagold.mintFree(msg.sender, DEATH_BOUNTY);
+            emit BountyPaid(targetId, msg.sender, DEATH_BOUNTY);
+        }
+        // else: pool exhausted, no bounty but death still processed
+    }
+
+    /* ========== GAME-ONLY: BehaviorEngine integration ========== */
+
+    /**
+     * @notice BehaviorEngine 调用：检查 Agent 是否还活着 (modifier 用)
+     * @dev 若已死则 revert；若事实死亡则先执行 _formallyDie 再 revert
+     */
+    function requireAlive(uint256 id) external onlyGame {
+        if (agentStatus[id] == Status.DEAD) revert AgentIsDead(id);
+        if (isEffectivelyDead(id)) {
+            _formallyDie(id);
+            revert AgentIsDead(id);
+        }
+    }
+
+    /**
+     * @notice 查询 Agent 状态
+     */
+    function isDead(uint256 id) external view returns (bool) {
+        return agentStatus[id] == Status.DEAD;
+    }
+}
+
+// ========== DNAGold.sol ==========
+
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+
+/**
+ * @title DNAGold
+ * @notice CodeDNA 双态代币 — 锁定态(Agent账本) + 解锁态(ERC-20自由流通)
+ *
+ * 总量: 1,000,000,000 枚，部署时一次性mint，永不增发。
+ * 分配: 85% gameContract (挖矿奖励池)
+ *       10% lpReserve   (PancakeSwap LP)
+ *        5% teamReserve (项目储备)
+ *
+ * 锁定态由 gameContract 独占操作，外部地址不可触碰。
+ * Agent 死亡时全部锁定余额发送至 0xdead 永久销毁。
+ */
+contract DNAGold is ERC20 {
+
+    /* ========== CONSTANTS ========== */
+
+    uint256 public constant TOTAL_SUPPLY    = 1_000_000_000 * 1e18;
+    uint256 public constant GAME_SHARE      =   850_000_000 * 1e18; // 85%
+    uint256 public constant LP_SHARE        =   100_000_000 * 1e18; // 10%
+    uint256 public constant TEAM_SHARE      =    50_000_000 * 1e18; //  5%
+
+    address public constant DEAD_ADDRESS    = 0x000000000000000000000000000000000000dEaD;
+
+    /* ========== STATE ========== */
+
+    address public immutable gameContract;
+    address public immutable economyContract; // EconomyEngine also needs token ops
+
+    /// @notice Agent 锁定余额账本 (agentId => amount)
+    mapping(uint256 => uint256) public lockedBalance;
+
+    /* ========== EVENTS ========== */
+
+    event LockedAdded   (uint256 indexed agentId, uint256 amount);
+    event LockedSpent   (uint256 indexed agentId, uint256 amount);
+    event LockedBurned  (uint256 indexed agentId, uint256 amount);
+    event FreeMinted    (address indexed to,      uint256 amount);
+
+    /* ========== ERRORS ========== */
+
+    error OnlyGame();
+    error ZeroAddress();
+    error InsufficientLocked(uint256 agentId, uint256 have, uint256 need);
+    error ZeroAmount();
+
+    /* ========== MODIFIER ========== */
+
+    modifier onlyGame() {
+        if (msg.sender != gameContract && msg.sender != economyContract) revert OnlyGame();
+        _;
+    }
+
+    /* ========== CONSTRUCTOR ========== */
+
+    /**
+     * @param _gameContract      BehaviorEngine / 主游戏合约地址
+     * @param _lpReserveAddress  LP 流动性储备地址
+     * @param _teamReserveAddress 项目团队储备地址
+     */
+    constructor(
+        address _gameContract,
+        address _economyContract,
+        address _lpReserveAddress,
+        address _teamReserveAddress
+    ) ERC20("DNAGold", "DNAGOLD") {
+        if (_gameContract == address(0))       revert ZeroAddress();
+        if (_economyContract == address(0))    revert ZeroAddress();
+        if (_lpReserveAddress == address(0))   revert ZeroAddress();
+        if (_teamReserveAddress == address(0)) revert ZeroAddress();
+
+        gameContract    = _gameContract;
+        economyContract = _economyContract;
+
+        // 一次性 mint 全部供应量，永不再增发
+        _mint(_gameContract,       GAME_SHARE);  // 850,000,000
+        _mint(_lpReserveAddress,   LP_SHARE);    // 100,000,000
+        _mint(_teamReserveAddress, TEAM_SHARE);  //  50,000,000
+    }
+
+    /* ========== GAME-ONLY FUNCTIONS ========== */
+
+    /**
+     * @notice 增加 Agent 的锁定余额（从 gameContract ERC-20 余额转入合约内部账本）
+     * @dev gameContract 的 ERC-20 余额减少，合约自持对应代币，lockedBalance 增加
+     */
+    function addLocked(uint256 agentId, uint256 amount) external onlyGame {
+        if (amount == 0) revert ZeroAmount();
+
+        // 从 gameContract 转到本合约地址，锁入内部账本
+        _transfer(gameContract, address(this), amount);
+        lockedBalance[agentId] += amount;
+
+        emit LockedAdded(agentId, amount);
+    }
+
+    /**
+     * @notice 扣除 Agent 锁定余额并销毁（进食、繁殖消耗等通缩场景）
+     */
+    function spendLocked(uint256 agentId, uint256 amount) external onlyGame {
+        if (amount == 0) revert ZeroAmount();
+
+        uint256 bal = lockedBalance[agentId];
+        if (bal < amount) revert InsufficientLocked(agentId, bal, amount);
+
+        // 先清账再销毁，防重入
+        lockedBalance[agentId] = bal - amount;
+        _burn(address(this), amount);
+
+        emit LockedSpent(agentId, amount);
+    }
+
+    /**
+     * @notice Agent 死亡时，全部锁定余额发送至 0xdead 永久销毁
+     */
+    function burnLocked(uint256 agentId) external onlyGame {
+        uint256 amount = lockedBalance[agentId];
+        if (amount == 0) return; // 无余额直接返回，不 revert
+
+        // 先清零再转账，防重入
+        lockedBalance[agentId] = 0;
+        _transfer(address(this), DEAD_ADDRESS, amount);
+
+        emit LockedBurned(agentId, amount);
+    }
+
+    /**
+     * @notice 将锁定代币从一个 Agent 转移到另一个 Agent（掠夺场景）
+     */
+    function transferLocked(uint256 fromAgent, uint256 toAgent, uint256 amount) external onlyGame {
+        if (amount == 0) revert ZeroAmount();
+
+        uint256 bal = lockedBalance[fromAgent];
+        if (bal < amount) revert InsufficientLocked(fromAgent, bal, amount);
+
+        lockedBalance[fromAgent] = bal - amount;
+        lockedBalance[toAgent]  += amount;
+    }
+
+    /**
+     * @notice mint 解锁代币到宿主钱包（采集 10% 宿主收益等场景）
+     * @dev 从 gameContract 余额转到目标地址，不增发新代币
+     */
+    function mintFree(address to, uint256 amount) external onlyGame {
+        if (to == address(0)) revert ZeroAddress();
+        if (amount == 0) revert ZeroAmount();
+
+        _transfer(gameContract, to, amount);
+
+        emit FreeMinted(to, amount);
+    }
+
+    /* ========== VIEW FUNCTIONS ========== */
+
+    /**
+     * @notice 查询 Agent 锁定余额
+     */
+    function getLockedBalance(uint256 agentId) external view returns (uint256) {
+        return lockedBalance[agentId];
+    }
+
+    /**
+     * @notice 查询地址的自由流通余额（标准 ERC-20 balanceOf）
+     */
+    function getFreeBalance(address account) external view returns (uint256) {
+        return balanceOf(account);
+    }
+}
+
+// ========== EconomyEngine.sol ==========
+
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+/**
+ * @title EconomyEngine
+ * @notice CodeDNA 经济引擎 — 减半、稀释、产出计算、奖励分发
+ *
+ * 减半: 双触发 while 循环 (人口 + 时间)
+ * 稀释: >10,000 存活时线性稀释
+ * 产出: 7 因子千分比连乘
+ * 奖励: 90% 锁定给 Agent, 10% 解锁给宿主
+ */
+
+/* ========== INTERFACES ========== */
+
+interface IDNAGold {
+    function mintFree(address to, uint256 amount) external;
+    function addLocked(uint256 agentId, uint256 amount) external;
+    function balanceOf(address account) external view returns (uint256);
+}
+
+interface IGenesisCore {
+    function ownerOf(uint256 tokenId) external view returns (address);
+    function getAttributes(uint256 tokenId) external view returns (uint16[8] memory attrs, uint8 gender);
+}
+
+interface IWorldMap {
+    function getPlotMultiplier(uint256 plotId) external pure returns (uint256);
+    function agentLocation(uint256 agentId) external view returns (uint256);
+}
+
+contract EconomyEngine {
+
+    /* ========== CONSTANTS ========== */
+
+    uint256 public constant BASE_YIELD           = 100 * 1e18;         // 100 枚 (草原基准)
+    uint256 public constant HALVING_POPULATION   = 500;                // 每 500 个出生触发
+    uint256 public constant HALVING_BLOCKS       = 10_512_000;         // ≈1年
+    uint256 public constant BASELINE_POPULATION  = 10_000;             // 稀释基准人口
+
+    /* ========== STATE ========== */
+
+    address public immutable gameContract;
+    IDNAGold public immutable dnagold;
+    IGenesisCore public immutable genesisCore;
+    IWorldMap public immutable worldMap;
+
+    uint256 public halvingCount;
+    uint256 public lastHalvingBlock;
+    uint256 public totalBornAgents;
+    uint256 public totalLivingAgents;
+
+    /// @notice 地块上的 Agent 列表 (plotId => agentId[])
+    mapping(uint256 => uint256[]) internal _plotAgents;
+
+    /// @notice Agent 在地块列表中的索引 (agentId => index in _plotAgents)
+    mapping(uint256 => uint256) internal _plotAgentIndex;
+
+    /// @notice Agent 是否在地块列表中
+    mapping(uint256 => bool) internal _agentInPlot;
+
+    /* ========== EVENTS ========== */
+
+    event HalvingOccurred(uint256 halvingCount, uint256 blockNumber, uint256 totalBorn);
+    event RewardDistributed(uint256 indexed agentId, address indexed host, uint256 hostShare, uint256 agentShare);
+    event RewardSkipped(uint256 indexed agentId, uint256 amount, string reason);
+
+    /* ========== ERRORS ========== */
+
+    error OnlyGame();
+    error ZeroAddress();
+
+    /* ========== MODIFIER ========== */
+
+    modifier onlyGame() {
+        if (msg.sender != gameContract) revert OnlyGame();
+        _;
+    }
+
+    /* ========== CONSTRUCTOR ========== */
+
+    constructor(
+        address _gameContract,
+        address _dnagold,
+        address _genesisCore,
+        address _worldMap
+    ) {
+        if (_gameContract == address(0)) revert ZeroAddress();
+        if (_dnagold == address(0)) revert ZeroAddress();
+        if (_genesisCore == address(0)) revert ZeroAddress();
+        if (_worldMap == address(0)) revert ZeroAddress();
+
+        gameContract = _gameContract;
+        dnagold = IDNAGold(_dnagold);
+        genesisCore = IGenesisCore(_genesisCore);
+        worldMap = IWorldMap(_worldMap);
+
+        lastHalvingBlock = block.number;
+    }
+
+    /* ========== HALVING ========== */
+
+    /**
+     * @notice 双触发 while 循环减半 — 任一条件满足就触发, while 防漏
+     * @dev 必须在每次可能改变 totalBornAgents 时调用
+     */
+    function checkAndHalve() external onlyGame {
+        _checkAndHalve();
+    }
+
+    function _checkAndHalve() internal {
+        while (
+            block.number >= lastHalvingBlock + HALVING_BLOCKS ||
+            totalBornAgents >= (halvingCount + 1) * HALVING_POPULATION
+        ) {
+            halvingCount++;
+            lastHalvingBlock = block.number;
+            emit HalvingOccurred(halvingCount, block.number, totalBornAgents);
+        }
+    }
+
+    /* ========== YIELD & DILUTION ========== */
+
+    /**
+     * @notice 当前基础产出 (减半后)
+     */
+    function getCurrentBaseYield() public view returns (uint256) {
+        return BASE_YIELD >> halvingCount;
+    }
+
+    /**
+     * @notice 全局稀释因子 (千分比, 1000 = 100%)
+     */
+    function getGlobalDilutionFactor() public view returns (uint256) {
+        if (totalLivingAgents <= BASELINE_POPULATION) return 1000;
+        return (BASELINE_POPULATION * 1000) / totalLivingAgents;
+    }
+
+    /* ========== GATHER YIELD CALCULATION ========== */
+
+    /**
+     * @notice 采集产出完整计算 — 7 因子千分比连乘
+     * @param agentId        Agent tokenId
+     * @param plotId         地块 ID
+     * @param plotCount      地块当前 Agent 数量
+     * @param isLeader       是否为该地块 LEADERSHIP 最高者
+     * @return yield         DNAGOLD 产出 (含 18 位精度)
+     */
+    function calcGatherYield(
+        uint256 agentId,
+        uint256 plotId,
+        uint256 plotCount,
+        bool isLeader
+    ) public view returns (uint256) {
+        uint256 base = getCurrentBaseYield();
+
+        // 地块倍率 (千分比)
+        uint256 plotMult = worldMap.getPlotMultiplier(plotId);
+
+        // Agent 属性
+        (uint16[8] memory attrs, ) = genesisCore.getAttributes(agentId);
+        uint256 iqScore  = uint256(attrs[0]);  // IQ:       0-255
+        uint256 strScore = uint256(attrs[2]);  // STRENGTH: 0-255
+
+        // 稀释因子 (千分比)
+        uint256 dilution = getGlobalDilutionFactor();
+
+        // IQ 系数: 0.8-1.8 → 800-1800 千分比
+        uint256 iqMult = 800 + (iqScore * 1000 / 255);
+
+        // STRENGTH 系数: 1.0-1.5 → 1000-1500 千分比
+        uint256 strMult = 1000 + (strScore * 500 / 255);
+
+        // LEADERSHIP 领袖加成: 1.0 或 1.15 → 1000 或 1150 千分比
+        uint256 leaderMult = isLeader ? 1150 : 1000;
+
+        // 平方竞争惩罚
+        uint256 competitionDiv = plotCount * plotCount;
+        if (competitionDiv == 0) competitionDiv = 1;
+
+        // 7 因子连乘 (乘法全部在除法前, 防精度损失)
+        uint256 result = base;
+        result = result * plotMult / 1000;
+        result = result * iqMult / 1000;
+        result = result * strMult / 1000;
+        result = result * leaderMult / 1000;
+        result = result * dilution / 1000;
+        result = result / competitionDiv;
+
+        return result;
+    }
+
+    /* ========== PLOT LEADER ========== */
+
+    /**
+     * @notice 获取地块上 LEADERSHIP 最高的 Agent
+     * @return leaderId  领袖的 tokenId (地块无 Agent 时返回 type(uint256).max)
+     */
+    function getPlotLeader(uint256 plotId) public view returns (uint256 leaderId) {
+        uint256[] storage agents = _plotAgents[plotId];
+        uint256 len = agents.length;
+        if (len == 0) return type(uint256).max;
+
+        uint256 maxLeadership = 0;
+        leaderId = agents[0];
+
+        for (uint256 i = 0; i < len; i++) {
+            (uint16[8] memory attrs, ) = genesisCore.getAttributes(agents[i]);
+            uint256 leadership = uint256(attrs[1]); // LEADERSHIP index = 1
+            if (leadership > maxLeadership) {
+                maxLeadership = leadership;
+                leaderId = agents[i];
+            }
+        }
+    }
+
+    /**
+     * @notice 获取地块上所有 Agent
+     */
+    function getPlotAgents(uint256 plotId) external view returns (uint256[] memory) {
+        return _plotAgents[plotId];
+    }
+
+    /* ========== REWARD DISTRIBUTION ========== */
+
+    /**
+     * @notice 奖励分发 — 10% 解锁给宿主, 90% 锁定给 Agent
+     * @dev 奖励池不足时静默跳过, 不 revert
+     */
+    function rewardAgent(uint256 agentId, uint256 totalAmount) external onlyGame {
+        if (totalAmount == 0) return;
+
+        // 检查奖励池余额 (gameContract 的 ERC-20 余额)
+        uint256 poolBalance = dnagold.balanceOf(gameContract);
+        if (poolBalance < totalAmount) {
+            emit RewardSkipped(agentId, totalAmount, "pool exhausted");
+            return;
+        }
+
+        uint256 hostShare  = totalAmount / 10;           // 10% 解锁
+        uint256 agentShare = totalAmount - hostShare;     // 90% 锁定
+
+        address host = genesisCore.ownerOf(agentId);
+
+        if (hostShare > 0) {
+            dnagold.mintFree(host, hostShare);
+        }
+        if (agentShare > 0) {
+            dnagold.addLocked(agentId, agentShare);
+        }
+
+        emit RewardDistributed(agentId, host, hostShare, agentShare);
+    }
+
+    /* ========== POPULATION TRACKING ========== */
+
+    /**
+     * @notice 新 Agent 出生时调用 (incrementBorn + incrementLiving + 减半检查)
+     */
+    function incrementBorn() external onlyGame {
+        totalBornAgents++;
+        totalLivingAgents++;
+        _checkAndHalve();
+    }
+
+    /**
+     * @notice 仅增加存活人口 (特殊场景: 如救助恢复)
+     */
+    function incrementLiving() external onlyGame {
+        totalLivingAgents++;
+    }
+
+    /**
+     * @notice Agent 死亡时调用
+     */
+    function decrementLiving() external onlyGame {
+        if (totalLivingAgents > 0) {
+            totalLivingAgents--;
+        }
+    }
+
+    /* ========== PLOT AGENT TRACKING ========== */
+
+    /**
+     * @notice 将 Agent 加入地块列表 (放置/移动时调用)
+     */
+    function addAgentToPlot(uint256 agentId, uint256 plotId) external onlyGame {
+        if (_agentInPlot[agentId]) return; // 防重复
+
+        _plotAgentIndex[agentId] = _plotAgents[plotId].length;
+        _plotAgents[plotId].push(agentId);
+        _agentInPlot[agentId] = true;
+    }
+
+    /**
+     * @notice 从地块列表移除 Agent (移动/死亡时调用)
+     */
+    function removeAgentFromPlot(uint256 agentId, uint256 plotId) external onlyGame {
+        if (!_agentInPlot[agentId]) return; // 不在列表
+
+        uint256[] storage agents = _plotAgents[plotId];
+        uint256 index = _plotAgentIndex[agentId];
+        uint256 lastIndex = agents.length - 1;
+
+        if (index != lastIndex) {
+            uint256 lastAgent = agents[lastIndex];
+            agents[index] = lastAgent;
+            _plotAgentIndex[lastAgent] = index;
+        }
+
+        agents.pop();
+        delete _plotAgentIndex[agentId];
+        _agentInPlot[agentId] = false;
+    }
+
+    /**
+     * @notice Agent 移动时更新地块列表
+     */
+    function moveAgentPlot(uint256 agentId, uint256 fromPlot, uint256 toPlot) external onlyGame {
+        // 从旧地块移除
+        if (_agentInPlot[agentId]) {
+            uint256[] storage fromAgents = _plotAgents[fromPlot];
+            uint256 index = _plotAgentIndex[agentId];
+            uint256 lastIndex = fromAgents.length - 1;
+
+            if (index != lastIndex) {
+                uint256 lastAgent = fromAgents[lastIndex];
+                fromAgents[index] = lastAgent;
+                _plotAgentIndex[lastAgent] = index;
+            }
+            fromAgents.pop();
+        }
+
+        // 加入新地块
+        _plotAgentIndex[agentId] = _plotAgents[toPlot].length;
+        _plotAgents[toPlot].push(agentId);
+        _agentInPlot[agentId] = true;
+    }
+}
+
+// ========== FamilyTracker.sol ==========
+
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+/**
+ * @title FamilyTracker
+ * @notice CodeDNA 血缘追踪 — 家族根节点、人口统计、固定2层近亲检查
+ *
+ * 创世 Agent: familyRoot = 自身 tokenId, headcount +1
+ * 子代 Agent: familyRoot = 父方的 familyRoot, headcount +1
+ * 近亲判定: 固定6种检查, gas恒定, 不递归
+ */
+contract FamilyTracker {
+
+    /* ========== CONSTANTS ========== */
+
+    /// @notice Sentinel 值表示 "无父母" (不可能是合法 tokenId)
+    uint256 public constant NO_PARENT = type(uint256).max;
+
+    /* ========== STRUCTS ========== */
+
+    struct Parents {
+        uint256 fatherId;  // NO_PARENT = 创世 (无父)
+        uint256 motherId;  // NO_PARENT = 创世 (无母)
+    }
+
+    /* ========== STATE ========== */
+
+    address public immutable gameContract;
+
+    /// @notice 每个 Agent 的父母 (0 = 无, 即创世 Agent)
+    mapping(uint256 => Parents) public parents;
+
+    /// @notice 家族根节点 (创世祖先的 tokenId)
+    mapping(uint256 => uint256) public familyRoot;
+
+    /// @notice 家族人口统计 key = keccak256(abi.encodePacked(familyRoot))
+    mapping(bytes32 => uint256) public familyHeadcount;
+
+    /// @notice Agent 是否已注册 (防重复注册)
+    mapping(uint256 => bool) public registered;
+
+    /* ========== EVENTS ========== */
+
+    event GenesisRegistered(uint256 indexed tokenId, bytes32 familyKey);
+    event BirthRegistered(uint256 indexed childId, uint256 fatherId, uint256 motherId, uint256 familyRootId);
+    event AgentRemoved(uint256 indexed tokenId, bytes32 familyKey);
+
+    /* ========== ERRORS ========== */
+
+    error OnlyGame();
+    error AlreadyRegistered(uint256 tokenId);
+    error NotRegistered(uint256 tokenId);
+
+    /* ========== MODIFIER ========== */
+
+    modifier onlyGame() {
+        if (msg.sender != gameContract) revert OnlyGame();
+        _;
+    }
+
+    /* ========== CONSTRUCTOR ========== */
+
+    constructor(address _gameContract) {
+        gameContract = _gameContract;
+    }
+
+    /* ========== REGISTRATION ========== */
+
+    /**
+     * @notice 注册创世 Agent — familyRoot = 自身
+     */
+    function registerGenesis(uint256 tokenId) external onlyGame {
+        if (registered[tokenId]) revert AlreadyRegistered(tokenId);
+
+        registered[tokenId] = true;
+        familyRoot[tokenId] = tokenId;
+
+        // 创世 Agent 无父母
+        parents[tokenId] = Parents({
+            fatherId: NO_PARENT,
+            motherId: NO_PARENT
+        });
+
+        bytes32 key = keccak256(abi.encodePacked(tokenId));
+        familyHeadcount[key]++;
+
+        emit GenesisRegistered(tokenId, key);
+    }
+
+    /**
+     * @notice 注册子代 Agent — familyRoot 继承父方
+     */
+    function registerBirth(uint256 childId, uint256 fatherId, uint256 motherId) external onlyGame {
+        if (registered[childId]) revert AlreadyRegistered(childId);
+        if (!registered[fatherId]) revert NotRegistered(fatherId);
+        if (!registered[motherId]) revert NotRegistered(motherId);
+
+        registered[childId] = true;
+
+        parents[childId] = Parents({
+            fatherId: fatherId,
+            motherId: motherId
+        });
+
+        // familyRoot 继承父方 (无限传递: 父的root来自父的父的root...直到创世)
+        uint256 rootId = familyRoot[fatherId];
+        familyRoot[childId] = rootId;
+
+        bytes32 key = keccak256(abi.encodePacked(rootId));
+        familyHeadcount[key]++;
+
+        emit BirthRegistered(childId, fatherId, motherId, rootId);
+    }
+
+    /**
+     * @notice Agent 死亡时减少家族人口 (由 DeathEngine 调用)
+     */
+    function removeAgent(uint256 tokenId) external onlyGame {
+        if (!registered[tokenId]) revert NotRegistered(tokenId);
+
+        bytes32 key = keccak256(abi.encodePacked(familyRoot[tokenId]));
+        if (familyHeadcount[key] > 0) {
+            familyHeadcount[key]--;
+        }
+
+        emit AgentRemoved(tokenId, key);
+    }
+
+    /* ========== QUERIES ========== */
+
+    /**
+     * @notice 固定2层近亲判定 — 6种关系, gas恒定, 不递归
+     *
+     * 检查:
+     *   1. a的父是b
+     *   2. a的母是b
+     *   3. b的父是a
+     *   4. b的母是a
+     *   5. a和b同父 (且父非0)
+     *   6. a和b同母 (且母非0)
+     */
+    function isDirectRelative(uint256 a, uint256 b) public view returns (bool) {
+        Parents storage pa = parents[a];
+        Parents storage pb = parents[b];
+
+        // 1. a的父是b (且a确实有父)
+        if (pa.fatherId != NO_PARENT && pa.fatherId == b) return true;
+        // 2. a的母是b (且a确实有母)
+        if (pa.motherId != NO_PARENT && pa.motherId == b) return true;
+        // 3. b的父是a (且b确实有父)
+        if (pb.fatherId != NO_PARENT && pb.fatherId == a) return true;
+        // 4. b的母是a (且b确实有母)
+        if (pb.motherId != NO_PARENT && pb.motherId == a) return true;
+        // 5. 同父 (fatherId非NO_PARENT才有意义, 排除创世)
+        if (pa.fatherId != NO_PARENT && pa.fatherId == pb.fatherId) return true;
+        // 6. 同母 (motherId非NO_PARENT才有意义, 排除创世)
+        if (pa.motherId != NO_PARENT && pa.motherId == pb.motherId) return true;
+
+        return false;
+    }
+
+    /**
+     * @notice 获取家族人口
+     */
+    function getFamilyHeadcount(uint256 rootId) external view returns (uint256) {
+        return familyHeadcount[keccak256(abi.encodePacked(rootId))];
+    }
+
+    /**
+     * @notice 获取 Agent 的父母
+     */
+    function getParents(uint256 tokenId) external view returns (uint256 fatherId, uint256 motherId) {
+        Parents storage p = parents[tokenId];
+        return (p.fatherId, p.motherId);
+    }
+}
+
+// ========== GenesisCore.sol ==========
+
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+
+/**
+ * @title GenesisCore
+ * @notice CodeDNA 创世 Agent NFT — ERC-721 + 链上 DNA 生成 + 阶梯价格铸造
+ *
+ * 最大供应: 10,000 个创世 Agent，售完永久关闭。
+ * DNA: 23 条基因 (uint8)，链上确定性随机生成。
+ * 能量: 创世 Agent 初始 80 点，lastEatBlock = 铸造区块。
+ * 价格: 每 1,000 个阶梯 +12%，起始 0.1 BNB。
+ * 收入: 全部 BNB 由 NFTSale (lpManager) 管理分配。
+ */
+contract GenesisCore is ERC721 {
+
+    /* ========== CONSTANTS ========== */
+
+    uint256 public constant MAX_GENESIS         = 10_000;
+    uint256 public constant GENESIS_BASE_PRICE  = 0.1 ether;
+    uint256 public constant PRICE_STEP_SIZE     = 1_000;
+    uint256 public constant PRICE_MULTIPLIER    = 112;
+    uint256 public constant PRICE_DIVISOR       = 100;
+    uint256 public constant ENERGY_INIT_GENESIS = 80;
+
+    /* ========== STATE ========== */
+
+    address public immutable deployer;
+    address public gameContract;  // BehaviorEngine, set after deploy
+    address public lpManager;     // NFTSale contract, set after deploy
+
+    uint256 public totalGenesisCount;
+    uint256 public totalTokenCount; // includes offspring
+
+    /// @notice 23 条基因 (uint8 each)
+    mapping(uint256 => uint8[23]) public agentGenes;
+
+    /// @notice 上次进食区块 (能量衰减基准)
+    mapping(uint256 => uint256) public lastEatBlock;
+
+    /// @notice Agent 基础能量值
+    mapping(uint256 => uint256) public agentEnergy;
+
+    /// @notice teach() 加成后的实际属性 (uint16, 防溢出)
+    mapping(uint256 => uint16[8]) public agentAttributeBonus;
+
+    /// @notice 每个 Agent 的繁殖次数
+    mapping(uint256 => uint256) public reproduceCount;
+
+    /* ========== EVENTS ========== */
+
+    event GenesisMinted(uint256 indexed tokenId, address indexed host, uint256 price, uint8 gender);
+    event OffspringMinted(uint256 indexed tokenId, uint256 fatherId, uint256 motherId, address indexed host);
+    event GameContractSet(address indexed gameContract);
+
+    /* ========== ERRORS ========== */
+
+    error SoldOut();
+    error ZeroAddress();
+    error TransferFailed();
+    error OnlyGame();
+    error OnlyOwner();
+    error OnlyLPManager();
+    error AttributeOverflow(uint256 tokenId, uint8 attrIdx);
+
+    /* ========== MODIFIERS ========== */
+
+    modifier onlyGame() {
+        if (msg.sender != gameContract) revert OnlyGame();
+        _;
+    }
+
+    /* ========== CONSTRUCTOR ========== */
+
+    constructor() ERC721("CodeDNA Agent", "CDNA") {
+        deployer = msg.sender;
+    }
+
+    /**
+     * @notice 设置 gameContract (仅部署者可调, 只能设一次)
+     */
+    function setGameContract(address _gameContract) external {
+        if (msg.sender != deployer) revert OnlyOwner();
+        if (gameContract != address(0)) revert OnlyOwner();
+        if (_gameContract == address(0)) revert ZeroAddress();
+        gameContract = _gameContract;
+        emit GameContractSet(_gameContract);
+    }
+
+    /**
+     * @notice 设置 LP 管理者 (NFTSale 合约地址，仅 deployer 可调，只能设一次)
+     */
+    function setLPManager(address _lpManager) external {
+        if (msg.sender != deployer) revert OnlyOwner();
+        if (lpManager != address(0)) revert OnlyOwner();
+        if (_lpManager == address(0)) revert ZeroAddress();
+        lpManager = _lpManager;
+    }
+
+    /* ========== MINTING ========== */
+
+    /**
+     * @notice 铸造创世 Agent NFT — 仅 NFTSale (lpManager) 可调用
+     * @param to     NFT 接收者
+     * @param price  本次铸造价格（用于 event 记录）
+     * @return tokenId 铸造的 tokenId
+     * @dev BNB 由 NFTSale 全权管理，GenesisCore 不接触资金
+     */
+    function mintFor(address to, uint256 price) external returns (uint256 tokenId) {
+        if (msg.sender != lpManager) revert OnlyLPManager();
+        if (totalGenesisCount >= MAX_GENESIS) revert SoldOut();
+
+        tokenId = totalGenesisCount;
+        totalGenesisCount++;
+        totalTokenCount++;
+
+        // === DNA 生成 ===
+        bytes32 seed = keccak256(
+            abi.encodePacked(
+                to,
+                block.prevrandao,
+                block.number,
+                block.timestamp,
+                tokenId
+            )
+        );
+
+        uint8[23] storage genes = agentGenes[tokenId];
+        for (uint256 i = 0; i < 23; i++) {
+            genes[i] = uint8(uint256(seed >> (i * 8)));
+        }
+
+        // === 能量初始化 ===
+        lastEatBlock[tokenId] = block.number;
+        agentEnergy[tokenId]  = ENERGY_INIT_GENESIS;
+
+        // === 铸造 NFT ===
+        _mint(to, tokenId);
+
+        emit GenesisMinted(tokenId, to, price, genes[21] % 2 == 0 ? 0 : 1);
+    }
+
+    /* ========== PRICE ========== */
+
+    /**
+     * @notice 当前创世 NFT 铸造价格
+     * @dev 每 1,000 个阶梯 ×112/100，纯整数运算
+     */
+    function getGenesisPrice() public view returns (uint256) {
+        uint256 tier = totalGenesisCount / PRICE_STEP_SIZE;
+        uint256 price = GENESIS_BASE_PRICE;
+        for (uint256 i = 0; i < tier; i++) {
+            price = (price * PRICE_MULTIPLIER) / PRICE_DIVISOR;
+        }
+        return price;
+    }
+
+    /* ========== DNA ATTRIBUTES (view) ========== */
+
+    function getGenes(uint256 tokenId) external view returns (uint8[23] memory) {
+        return agentGenes[tokenId];
+    }
+
+    function getAttributes(uint256 tokenId) external view returns (uint16[8] memory attrs, uint8 gender) {
+        uint8[23] storage g = agentGenes[tokenId];
+
+        attrs[0] = uint16(g[0]) * 4 / 10 + uint16(g[8]) * 3 / 10 + uint16(g[5]) * 3 / 10;
+        attrs[1] = uint16(g[7]) * 5 / 10 + uint16(g[5]) * 3 / 10 + uint16(g[1]) * 2 / 10;
+        attrs[2] = uint16(g[1]) * 6 / 10 + uint16(g[2]) * 4 / 10;
+        attrs[3] = uint16(g[2]) * 7 / 10 + uint16(g[6]) * 3 / 10;
+        attrs[4] = uint16(g[5]) * 5 / 10 + uint16(g[4]) * 5 / 10;
+        attrs[5] = uint16(g[6]) * 6 / 10 + uint16(g[3]) * 4 / 10;
+        attrs[6] = uint16(g[4]) * 5 / 10 + uint16(g[8]) * 5 / 10;
+        attrs[7] = 100 + uint16(g[22]) * 3 / 10;
+
+        gender = g[21] % 2 == 0 ? 0 : 1;
+    }
+
+    function getGender(uint256 tokenId) external view returns (uint8) {
+        return agentGenes[tokenId][21] % 2 == 0 ? 0 : 1;
+    }
+
+    function getEffectiveAttribute(uint256 tokenId, uint8 attrIdx) external view returns (uint16) {
+        (uint16[8] memory base, ) = this.getAttributes(tokenId);
+        return base[attrIdx] + agentAttributeBonus[tokenId][attrIdx];
+    }
+
+    function getDNAAttribute(uint256 tokenId, uint8 attrIdx) external view returns (uint16) {
+        (uint16[8] memory base, ) = this.getAttributes(tokenId);
+        return base[attrIdx];
+    }
+
+    /* ========== GAME-ONLY WRITE FUNCTIONS ========== */
+
+    function setEnergy(uint256 tokenId, uint256 energy) external onlyGame {
+        agentEnergy[tokenId] = energy;
+    }
+
+    function setLastEatBlock(uint256 tokenId, uint256 blockNum) external onlyGame {
+        lastEatBlock[tokenId] = blockNum;
+    }
+
+    function incrementReproduceCount(uint256 tokenId) external onlyGame {
+        reproduceCount[tokenId]++;
+    }
+
+    function addAttributeBonus(uint256 tokenId, uint8 attrIdx, uint16 bonus) external onlyGame {
+        uint16 current = agentAttributeBonus[tokenId][attrIdx];
+        if (current + bonus > 20) revert AttributeOverflow(tokenId, attrIdx);
+        agentAttributeBonus[tokenId][attrIdx] = current + bonus;
+    }
+
+    function mintOffspring(
+        address to,
+        uint256 fatherId,
+        uint256 motherId
+    ) external onlyGame returns (uint256 childId) {
+        childId = 10_000 + (totalTokenCount - totalGenesisCount);
+        totalTokenCount++;
+
+        uint8[23] storage fGenes = agentGenes[fatherId];
+        uint8[23] storage mGenes = agentGenes[motherId];
+        uint8[23] storage cGenes = agentGenes[childId];
+
+        for (uint256 i = 0; i < 23; i++) {
+            bytes32 r = keccak256(abi.encodePacked(fatherId, motherId, i, block.prevrandao, block.number));
+            cGenes[i] = uint8(r[0]) % 2 == 0 ? fGenes[i] : mGenes[i];
+            if (uint8(r[1]) < 3) {
+                cGenes[i] = uint8(r[2]);
+            }
+        }
+
+        lastEatBlock[childId] = block.number;
+        agentEnergy[childId]  = 50;
+
+        _mint(to, childId);
+
+        emit OffspringMinted(childId, fatherId, motherId, to);
+        return childId;
+    }
+
+    function markDead(uint256 tokenId) external onlyGame {
+        agentEnergy[tokenId] = 0;
+        lastEatBlock[tokenId] = 0;
+    }
+}
+
+// ========== NFTMarket.sol ==========
+
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+/**
+ * @title NFTMarket
+ * @notice CodeDNA Agent 二级交易市场 — 用解锁态 DNAGOLD 买卖 Agent NFT
+ *
+ * 流程:
+ *   挂单: seller 将 NFT 转入合约托管，记录价格
+ *   购买: buyer 用 DNAGOLD 支付（2.5% 手续费），NFT 转给 buyer
+ *   取消: seller 取回 NFT
+ *
+ * 特殊处理:
+ *   - 托管期间 Agent 能量继续衰减（链上时间不停）
+ *   - 若 Agent 在托管期间死亡（isEffectivelyDead=true），任何人可调 cleanDeadListing 清理
+ *   - 购买时检查 Agent 是否已死，已死则 revert（防止买家买到尸体）
+ *   - lockedBalance 绑定 agentId 不绑定 owner，NFT 转移后自动跟随
+ *
+ * 安全:
+ *   - 手续费 2.5% = 25/1000
+ *   - feeAddress 构造函数写死不可改
+ *   - 使用 ERC20 transferFrom（buyer 需先 approve）
+ */
+
+/* ========== INTERFACES ========== */
+
+interface IMktDNAGold {
+    function transferFrom(address from, address to, uint256 amount) external returns (bool);
+    function balanceOf(address account) external view returns (uint256);
+    function allowance(address owner, address spender) external view returns (uint256);
+}
+
+interface IMktGenesisCore {
+    function ownerOf(uint256 tokenId) external view returns (address);
+    function safeTransferFrom(address from, address to, uint256 tokenId) external;
+    function getAttributes(uint256 tokenId) external view returns (uint16[8] memory attrs, uint8 gender);
+    function getGenes(uint256 tokenId) external view returns (uint8[23] memory);
+    function agentEnergy(uint256 tokenId) external view returns (uint256);
+    function lastEatBlock(uint256 tokenId) external view returns (uint256);
+}
+
+interface IMktDNAGoldLocked {
+    function lockedBalance(uint256 agentId) external view returns (uint256);
+}
+
+interface IMktDeathEngine {
+    function isEffectivelyDead(uint256 tokenId) external view returns (bool);
+    function isDead(uint256 tokenId) external view returns (bool);
+    function checkDeath(uint256 tokenId) external;
+}
+
+contract NFTMarket {
+
+    /* ========== CONSTANTS ========== */
+
+    uint256 public constant FEE_BPS  = 25;    // 2.5%
+    uint256 public constant BPS_BASE = 1000;
+
+    /* ========== STRUCTS ========== */
+
+    struct Listing {
+        address seller;
+        uint256 price;     // DNAGOLD (18 decimals)
+        uint256 listedAt;  // block.number
+    }
+
+    /* ========== STATE ========== */
+
+    IMktDNAGold       public immutable dnagold;
+    IMktGenesisCore   public immutable genesisCore;
+    IMktDNAGoldLocked public immutable dnagoldLocked; // same contract as dnagold, different interface
+    IMktDeathEngine   public immutable deathEngine;
+    address           public immutable feeAddress;
+
+    /// @notice tokenId => Listing (seller=address(0) means not listed)
+    mapping(uint256 => Listing) public listings;
+
+    /// @notice 所有活跃挂单的 tokenId 列表
+    uint256[] public activeListingIds;
+    mapping(uint256 => uint256) internal _listingIndex; // tokenId => index in activeListingIds
+
+    /// @notice 累计手续费
+    uint256 public totalFeesCollected;
+
+    /// @notice 累计交易量
+    uint256 public totalVolume;
+
+    /* ========== EVENTS ========== */
+
+    event AgentListed(uint256 indexed tokenId, address indexed seller, uint256 price);
+    event AgentDelisted(uint256 indexed tokenId, address indexed seller);
+    event AgentSold(uint256 indexed tokenId, address indexed seller, address indexed buyer, uint256 price, uint256 fee);
+    event DeadListingCleaned(uint256 indexed tokenId, address indexed seller);
+
+    /* ========== ERRORS ========== */
+
+    error NotOwner(uint256 tokenId, address caller);
+    error NotSeller(uint256 tokenId, address caller);
+    error NotListed(uint256 tokenId);
+    error AlreadyListed(uint256 tokenId);
+    error AgentIsDead(uint256 tokenId);
+    error InsufficientBalance(uint256 have, uint256 need);
+    error InsufficientAllowance(uint256 have, uint256 need);
+    error ZeroPrice();
+    error ZeroAddress();
+    error TransferFailed();
+    error BuyOwnListing();
+    error AgentNotDead(uint256 tokenId);
+
+    /* ========== CONSTRUCTOR ========== */
+
+    constructor(
+        address _dnagold,
+        address _genesisCore,
+        address _deathEngine,
+        address _feeAddress
+    ) {
+        if (_dnagold == address(0))     revert ZeroAddress();
+        if (_genesisCore == address(0)) revert ZeroAddress();
+        if (_deathEngine == address(0)) revert ZeroAddress();
+        if (_feeAddress == address(0))  revert ZeroAddress();
+
+        dnagold       = IMktDNAGold(_dnagold);
+        genesisCore   = IMktGenesisCore(_genesisCore);
+        dnagoldLocked = IMktDNAGoldLocked(_dnagold); // same address
+        deathEngine   = IMktDeathEngine(_deathEngine);
+        feeAddress    = _feeAddress;
+    }
+
+    /* ========== LIST ========== */
+
+    /**
+     * @notice 挂单出售 Agent
+     * @param tokenId Agent NFT tokenId
+     * @param price   售价（解锁态 DNAGOLD，18 位精度）
+     *
+     * @dev seller 需先 approve NFTMarket 合约操作其 NFT
+     *      NFT 转入合约托管直到售出或取消
+     */
+    function listAgent(uint256 tokenId, uint256 price) external {
+        if (price == 0) revert ZeroPrice();
+        if (listings[tokenId].seller != address(0)) revert AlreadyListed(tokenId);
+
+        // 检查 ownership
+        address owner = genesisCore.ownerOf(tokenId);
+        if (owner != msg.sender) revert NotOwner(tokenId, msg.sender);
+
+        // 检查 Agent 未死亡
+        if (_isAgentDead(tokenId)) revert AgentIsDead(tokenId);
+
+        // 将 NFT 转入合约托管
+        genesisCore.safeTransferFrom(msg.sender, address(this), tokenId);
+
+        // 记录挂单
+        listings[tokenId] = Listing({
+            seller: msg.sender,
+            price: price,
+            listedAt: block.number
+        });
+
+        // 加入活跃列表
+        _listingIndex[tokenId] = activeListingIds.length;
+        activeListingIds.push(tokenId);
+
+        emit AgentListed(tokenId, msg.sender, price);
+    }
+
+    /* ========== CANCEL ========== */
+
+    /**
+     * @notice 取消挂单，NFT 归还 seller
+     */
+    function cancelListing(uint256 tokenId) external {
+        Listing storage lst = listings[tokenId];
+        if (lst.seller == address(0)) revert NotListed(tokenId);
+        if (lst.seller != msg.sender) revert NotSeller(tokenId, msg.sender);
+
+        address seller = lst.seller;
+
+        // 清理挂单
+        _removeListing(tokenId);
+
+        // NFT 归还
+        genesisCore.safeTransferFrom(address(this), seller, tokenId);
+
+        emit AgentDelisted(tokenId, seller);
+    }
+
+    /* ========== BUY ========== */
+
+    /**
+     * @notice 购买挂单 Agent
+     * @param tokenId 目标 Agent
+     *
+     * @dev buyer 需先 approve 足够的 DNAGOLD 给本合约
+     *      手续费 2.5% 给 feeAddress，实收 97.5% 给 seller
+     */
+    function buyAgent(uint256 tokenId) external {
+        Listing storage lst = listings[tokenId];
+        if (lst.seller == address(0)) revert NotListed(tokenId);
+
+        // 不能买自己的
+        if (lst.seller == msg.sender) revert BuyOwnListing();
+
+        // Agent 死亡检查
+        if (_isAgentDead(tokenId)) revert AgentIsDead(tokenId);
+
+        address seller = lst.seller;
+        uint256 price  = lst.price;
+
+        // 手续费计算: 2.5% = price * 25 / 1000
+        uint256 fee      = (price * FEE_BPS) / BPS_BASE;
+        uint256 sellerAmt = price - fee;
+
+        // 检查 buyer DNAGOLD 余额和 allowance
+        uint256 buyerBal = dnagold.balanceOf(msg.sender);
+        if (buyerBal < price) revert InsufficientBalance(buyerBal, price);
+
+        uint256 buyerAllowance = dnagold.allowance(msg.sender, address(this));
+        if (buyerAllowance < price) revert InsufficientAllowance(buyerAllowance, price);
+
+        // 清理挂单（先清理再转账，防重入）
+        _removeListing(tokenId);
+
+        // DNAGOLD 转账: seller 实收
+        bool ok1 = dnagold.transferFrom(msg.sender, seller, sellerAmt);
+        if (!ok1) revert TransferFailed();
+
+        // DNAGOLD 转账: 手续费
+        if (fee > 0) {
+            bool ok2 = dnagold.transferFrom(msg.sender, feeAddress, fee);
+            if (!ok2) revert TransferFailed();
+        }
+
+        // NFT 转给 buyer
+        genesisCore.safeTransferFrom(address(this), msg.sender, tokenId);
+
+        totalFeesCollected += fee;
+        totalVolume += price;
+
+        emit AgentSold(tokenId, seller, msg.sender, price, fee);
+    }
+
+    /* ========== DEAD LISTING CLEANUP ========== */
+
+    /**
+     * @notice 清理托管期间死亡的 Agent — 任何人可调用
+     * @dev NFT 归还给原 seller（虽然 Agent 已死，NFT 本身仍可持有作为收藏品）
+     *      同时触发 DeathEngine.checkDeath 正式执行死亡
+     */
+    function cleanDeadListing(uint256 tokenId) external {
+        Listing storage lst = listings[tokenId];
+        if (lst.seller == address(0)) revert NotListed(tokenId);
+
+        // 必须确认 Agent 已死
+        if (!_isAgentDead(tokenId)) revert AgentNotDead(tokenId);
+
+        address seller = lst.seller;
+
+        // 清理挂单
+        _removeListing(tokenId);
+
+        // 触发正式死亡
+        try deathEngine.checkDeath(tokenId) {} catch {}
+
+        // NFT 归还给 seller
+        genesisCore.safeTransferFrom(address(this), seller, tokenId);
+
+        emit DeadListingCleaned(tokenId, seller);
+    }
+
+    /* ========== VIEW FUNCTIONS ========== */
+
+    /**
+     * @notice 获取活跃挂单总数
+     */
+    function getActiveListingCount() external view returns (uint256) {
+        return activeListingIds.length;
+    }
+
+    /**
+     * @notice 分页获取活跃挂单列表
+     * @param offset 起始索引
+     * @param limit  最多返回数量
+     */
+    function getActiveListings(uint256 offset, uint256 limit) external view returns (
+        uint256[] memory tokenIds,
+        address[] memory sellers,
+        uint256[] memory prices,
+        uint256[] memory lockedBalances
+    ) {
+        uint256 total = activeListingIds.length;
+        if (offset >= total) {
+            return (new uint256[](0), new address[](0), new uint256[](0), new uint256[](0));
+        }
+
+        uint256 end = offset + limit;
+        if (end > total) end = total;
+        uint256 count = end - offset;
+
+        tokenIds       = new uint256[](count);
+        sellers        = new address[](count);
+        prices         = new uint256[](count);
+        lockedBalances = new uint256[](count);
+
+        for (uint256 i = 0; i < count; i++) {
+            uint256 tid = activeListingIds[offset + i];
+            Listing storage lst = listings[tid];
+            tokenIds[i]       = tid;
+            sellers[i]        = lst.seller;
+            prices[i]         = lst.price;
+            lockedBalances[i] = dnagoldLocked.lockedBalance(tid);
+        }
+    }
+
+    /**
+     * @notice 获取单个挂单详情（含 Agent 属性）
+     */
+    function getListingDetail(uint256 tokenId) external view returns (
+        address seller,
+        uint256 price,
+        uint256 listedAt,
+        uint256 locked,
+        uint16[8] memory attrs,
+        uint8 gender
+    ) {
+        Listing storage lst = listings[tokenId];
+        seller   = lst.seller;
+        price    = lst.price;
+        listedAt = lst.listedAt;
+        locked   = dnagoldLocked.lockedBalance(tokenId);
+        (attrs, gender) = genesisCore.getAttributes(tokenId);
+    }
+
+    /* ========== INTERNAL ========== */
+
+    function _removeListing(uint256 tokenId) internal {
+        delete listings[tokenId];
+
+        // swap-and-pop from activeListingIds
+        uint256 index = _listingIndex[tokenId];
+        uint256 lastIndex = activeListingIds.length - 1;
+        if (index != lastIndex) {
+            uint256 lastId = activeListingIds[lastIndex];
+            activeListingIds[index] = lastId;
+            _listingIndex[lastId] = index;
+        }
+        activeListingIds.pop();
+        delete _listingIndex[tokenId];
+    }
+
+    function _isAgentDead(uint256 tokenId) internal view returns (bool) {
+        try deathEngine.isDead(tokenId) returns (bool dead) {
+            if (dead) return true;
+        } catch {}
+        try deathEngine.isEffectivelyDead(tokenId) returns (bool eDead) {
+            return eDead;
+        } catch {}
+        return false;
+    }
+
+    /* ========== ERC721 RECEIVER ========== */
+
+    function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4) {
+        return this.onERC721Received.selector;
+    }
+}
+
+// ========== NFTSale.sol ==========
+
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+/**
+ * @title NFTSale
+ * @notice CodeDNA 创世 NFT 销售 + 三阶段自动 PancakeSwap LP 注入
+ *
+ * ┌──────────────────────────────────────────────────────────┐
+ * │ 阶段一 (铸造 #1 ~ #499):                                │
+ * │   80% BNB + 10,000 DNAGOLD 累加到 pending 变量          │
+ * │   20% BNB 即时转运营钱包                                 │
+ * │   不调用 PancakeSwap                                     │
+ * │                                                          │
+ * │ 阶段二 (铸造 #500):                                      │
+ * │   本次 80%+10k 也计入 pending                            │
+ * │   一次性调用 addLiquidityETH 建池                        │
+ * │   LP 代币归合约永久持有，无法取出                         │
+ * │                                                          │
+ * │ 阶段三 (铸造 #501 ~ #10,000):                            │
+ * │   每次铸造即时追加流动性                                  │
+ * │   多余资产累加进 surplus 下次使用                         │
+ * └──────────────────────────────────────────────────────────┘
+ *
+ * 安全:
+ *   - LP 代币接收地址 = address(this)，合约无任何函数可转出 LP
+ *   - addLiquidityETH 包在 try-catch 中，失败不影响铸造
+ *   - 所有参数为 immutable/constant，部署后永久不可修改
+ */
+
+/* ========== INTERFACES ========== */
+
+interface ISaleGenesisCore {
+    function mintFor(address to, uint256 price) external returns (uint256);
+    function getGenesisPrice() external view returns (uint256);
+    function totalGenesisCount() external view returns (uint256);
+    function MAX_GENESIS() external view returns (uint256);
+}
+
+interface ISaleDNAGold {
+    function balanceOf(address account) external view returns (uint256);
+    function approve(address spender, uint256 amount) external returns (bool);
+    function transfer(address to, uint256 amount) external returns (bool);
+    function transferFrom(address from, address to, uint256 amount) external returns (bool);
+}
+
+interface IPancakeRouter {
+    function addLiquidityETH(
+        address token,
+        uint amountTokenDesired,
+        uint amountTokenMin,
+        uint amountETHMin,
+        address to,
+        uint deadline
+    ) external payable returns (uint amountToken, uint amountETH, uint liquidity);
+
+    function WETH() external pure returns (address);
+}
+
+contract NFTSale {
+
+    /* ========== CONSTANTS (部署后永久不可修改) ========== */
+
+    /// @notice 触发建池的铸造数量阈值
+    uint256 public constant LP_INJECT_THRESHOLD = 500;
+
+    /// @notice 每铸造一个 NFT 对应的 DNAGOLD 数量
+    uint256 public constant GOLD_PER_MINT = 10_000 * 1e18;
+
+    /// @notice 铸造 BNB 中用于 LP 的比例 (80%)
+    uint256 public constant LP_BPS  = 8_000;
+    uint256 public constant OPS_BPS = 2_000;
+    uint256 public constant BPS_BASE = 10_000;
+
+    /// @notice LP 滑点保护: 最少接受 95%
+    uint256 public constant SLIPPAGE_BPS = 9_500;
+
+    /* ========== IMMUTABLE (部署时写死) ========== */
+
+    ISaleGenesisCore public immutable genesisCore;
+    ISaleDNAGold     public immutable dnagold;
+    IPancakeRouter   public immutable pancakeRouter;
+    address          public immutable opsWallet;
+    address          public immutable goldSource; // 持有 LP 份额 DNAGOLD 的地址
+
+    /* ========== STATE ========== */
+
+    /// @notice 阶段一累积: 待注入 LP 的 BNB
+    uint256 public pendingLP_BNB;
+
+    /// @notice 阶段一累积: 待注入 LP 的 DNAGOLD (合约已持有)
+    uint256 public pendingLP_GOLD;
+
+    /// @notice 阶段三: addLiquidityETH 未用完的 DNAGOLD 余量
+    uint256 public surplusLP_GOLD;
+
+    /// @notice 池子是否已建立
+    bool public lpLaunched;
+
+    /// @notice 累计注入 LP 的 BNB 总量
+    uint256 public totalLPBNBInjected;
+
+    /// @notice 累计注入 LP 的 DNAGOLD 总量
+    uint256 public totalLPGOLDInjected;
+
+    /// @notice 累计 BNB 收入
+    uint256 public totalRaised;
+
+    /// @notice Reentrancy guard
+    bool private _locked;
+
+    /* ========== EVENTS ========== */
+
+    event GenesisPurchased(address indexed buyer, uint256 indexed tokenId, uint256 price);
+    event LiquidityLaunched(uint256 bnbAmount, uint256 goldAmount, uint256 blockNumber);
+    event LiquidityAdded(uint256 bnbAmount, uint256 goldAmount);
+    event LPAttemptFailed(uint256 bnbAmount, uint256 goldAmount, string reason);
+
+    /* ========== ERRORS ========== */
+
+    error SoldOut();
+    error WrongPayment(uint256 required, uint256 sent);
+    error ZeroAddress();
+    error InsufficientGoldSource();
+    error ReentrancyGuard();
+
+    /* ========== CONSTRUCTOR ========== */
+
+    /**
+     * @param _genesisCore    GenesisCore 合约
+     * @param _dnagold        DNAGold 代币
+     * @param _pancakeRouter  PancakeSwap V2 Router (BSC: 0x10ED43C718714eb63d5aA57B78B54704E256024E)
+     * @param _opsWallet      运营钱包 (接收 20% BNB)
+     * @param _goldSource     DNAGOLD 来源地址 (部署时持有 100M LP 份额，需预先 approve)
+     */
+    constructor(
+        address _genesisCore,
+        address _dnagold,
+        address _pancakeRouter,
+        address _opsWallet,
+        address _goldSource
+    ) {
+        if (_genesisCore == address(0))  revert ZeroAddress();
+        if (_dnagold == address(0))      revert ZeroAddress();
+        if (_pancakeRouter == address(0)) revert ZeroAddress();
+        if (_opsWallet == address(0))    revert ZeroAddress();
+        if (_goldSource == address(0))   revert ZeroAddress();
+
+        genesisCore   = ISaleGenesisCore(_genesisCore);
+        dnagold       = ISaleDNAGold(_dnagold);
+        pancakeRouter = IPancakeRouter(_pancakeRouter);
+        opsWallet     = _opsWallet;
+        goldSource    = _goldSource;
+    }
+
+    /* ========== MINT ========== */
+
+    /**
+     * @notice 铸造创世 Agent NFT
+     * @dev 用户发送 BNB 到此函数:
+     *      1. 80% BNB 用于 LP (按阶段处理)
+     *      2. 20% BNB 即时转运营钱包
+     *      3. 调用 GenesisCore.mintFor 铸造 NFT 给 msg.sender
+     *      4. 从 goldSource 拉取 10,000 DNAGOLD 用于 LP
+     */
+    function mintGenesis() external payable {
+        if (_locked) revert ReentrancyGuard();
+        _locked = true;
+
+        uint256 price = genesisCore.getGenesisPrice();
+        if (msg.value != price) revert WrongPayment(price, msg.value);
+
+        uint256 countBefore = genesisCore.totalGenesisCount();
+        if (countBefore >= genesisCore.MAX_GENESIS()) revert SoldOut();
+
+        // === 1. BNB 分配 ===
+        uint256 opsAmount = (msg.value * OPS_BPS) / BPS_BASE;
+        uint256 lpAmount  = msg.value - opsAmount;
+
+        // 20% 即时转运营钱包
+        (bool opsOk, ) = opsWallet.call{value: opsAmount}("");
+        if (!opsOk) revert ZeroAddress(); // reuse error to save bytecode
+
+        totalRaised += msg.value;
+
+        // === 2. 铸造 NFT ===
+        uint256 tokenId = genesisCore.mintFor(msg.sender, price);
+
+        // === 3. 从 goldSource 拉取 DNAGOLD ===
+        // goldSource 必须预先 approve 足够的 DNAGOLD 给本合约
+        uint256 goldSourceBal = dnagold.balanceOf(goldSource);
+        if (goldSourceBal < GOLD_PER_MINT) revert InsufficientGoldSource();
+        bool goldOk = dnagold.transferFrom(goldSource, address(this), GOLD_PER_MINT);
+        if (!goldOk) revert InsufficientGoldSource();
+
+        // === 4. LP 阶段处理 ===
+        // countBefore 是铸造前的数量，铸造后 totalGenesisCount = countBefore + 1
+        // 第 N 次铸造: countBefore = N - 1
+        uint256 mintNumber = countBefore + 1; // 第几次铸造 (1-indexed)
+
+        if (!lpLaunched) {
+            // 阶段一 + 阶段二
+            pendingLP_BNB  += lpAmount;
+            pendingLP_GOLD += GOLD_PER_MINT;
+
+            if (mintNumber >= LP_INJECT_THRESHOLD) {
+                // 阶段二: 第 500 次铸造，触发建池
+                _launchLP();
+            }
+        } else {
+            // 阶段三: 即时追加流动性
+            _addLP(lpAmount, GOLD_PER_MINT);
+        }
+
+        emit GenesisPurchased(msg.sender, tokenId, price);
+
+        _locked = false;
+    }
+
+    /* ========== INTERNAL: LP LAUNCH (阶段二) ========== */
+
+    /**
+     * @dev 一次性将全部 pending 资产注入 PancakeSwap 建池
+     *      LP 代币接收地址 = address(this)，永久锁定
+     */
+    function _launchLP() internal {
+        uint256 bnbToInject  = pendingLP_BNB;
+        uint256 goldToInject = pendingLP_GOLD;
+
+        // Safety: if router has no code (shouldn't happen in prod), skip
+        address routerAddr = address(pancakeRouter);
+        uint256 routerSize;
+        assembly { routerSize := extcodesize(routerAddr) }
+        if (routerSize == 0) {
+            emit LPAttemptFailed(bnbToInject, goldToInject, "no router");
+            return;
+        }
+
+        // 清零 pending (CEI: 先改状态再外部调用)
+        pendingLP_BNB  = 0;
+        pendingLP_GOLD = 0;
+
+        // Approve router
+        dnagold.approve(address(pancakeRouter), goldToInject);
+
+        uint256 minGold = (goldToInject * SLIPPAGE_BPS) / BPS_BASE;
+        uint256 minBNB  = (bnbToInject * SLIPPAGE_BPS) / BPS_BASE;
+
+        try pancakeRouter.addLiquidityETH{value: bnbToInject}(
+            address(dnagold),
+            goldToInject,
+            minGold,
+            minBNB,
+            address(this), // LP 代币归合约永久持有
+            block.timestamp + 300
+        ) returns (uint256 usedGold, uint256 usedBNB, uint256) {
+            // 建池成功
+            lpLaunched = true;
+            totalLPBNBInjected  += usedBNB;
+            totalLPGOLDInjected += usedGold;
+
+            // 多余的 DNAGOLD 记入 surplus
+            if (goldToInject > usedGold) {
+                surplusLP_GOLD += (goldToInject - usedGold);
+            }
+            // 多余的 BNB 留在合约余额，下次追加时使用
+
+            emit LiquidityLaunched(usedBNB, usedGold, block.number);
+        } catch Error(string memory reason) {
+            // 建池失败: 回退到 pending，不影响铸造
+            pendingLP_BNB  = bnbToInject;
+            pendingLP_GOLD = goldToInject;
+            emit LPAttemptFailed(bnbToInject, goldToInject, reason);
+        } catch {
+            pendingLP_BNB  = bnbToInject;
+            pendingLP_GOLD = goldToInject;
+            emit LPAttemptFailed(bnbToInject, goldToInject, "unknown");
+        }
+    }
+
+    /* ========== INTERNAL: LP ADD (阶段三) ========== */
+
+    /**
+     * @dev 每次铸造后即时追加流动性
+     *      使用本次 LP BNB + 本次 DNAGOLD + surplus 余量
+     */
+    function _addLP(uint256 bnbAmount, uint256 goldAmount) internal {
+        // 加上之前的 surplus 和合约余留 BNB
+        uint256 totalGold = goldAmount + surplusLP_GOLD;
+
+        // Safety: if router has no code, accumulate to pending
+        address routerAddr = address(pancakeRouter);
+        uint256 routerSize;
+        assembly { routerSize := extcodesize(routerAddr) }
+        if (routerSize == 0) {
+            pendingLP_BNB  += bnbAmount;
+            pendingLP_GOLD += totalGold;
+            emit LPAttemptFailed(bnbAmount, totalGold, "no router");
+            return;
+        }
+
+        surplusLP_GOLD = 0; // 先清零
+
+        // Approve router
+        dnagold.approve(address(pancakeRouter), totalGold);
+
+        uint256 minGold = (totalGold * SLIPPAGE_BPS) / BPS_BASE;
+        uint256 minBNB  = (bnbAmount * SLIPPAGE_BPS) / BPS_BASE;
+
+        try pancakeRouter.addLiquidityETH{value: bnbAmount}(
+            address(dnagold),
+            totalGold,
+            minGold,
+            minBNB,
+            address(this), // LP 代币归合约永久持有
+            block.timestamp + 300
+        ) returns (uint256 usedGold, uint256 usedBNB, uint256) {
+            totalLPBNBInjected  += usedBNB;
+            totalLPGOLDInjected += usedGold;
+
+            // 多余的 DNAGOLD 记入 surplus
+            if (totalGold > usedGold) {
+                surplusLP_GOLD = totalGold - usedGold;
+            }
+
+            emit LiquidityAdded(usedBNB, usedGold);
+        } catch Error(string memory reason) {
+            // 追加失败: 存入 pending，下次一并注入
+            pendingLP_BNB  += bnbAmount;
+            pendingLP_GOLD += totalGold;
+            emit LPAttemptFailed(bnbAmount, totalGold, reason);
+        } catch {
+            pendingLP_BNB  += bnbAmount;
+            pendingLP_GOLD += totalGold;
+            emit LPAttemptFailed(bnbAmount, totalGold, "unknown");
+        }
+    }
+
+    /* ========== VIEW FUNCTIONS ========== */
+
+    /// @notice 当前累积的待注入 LP 资产
+    function getPendingLP() external view returns (uint256 bnb, uint256 gold) {
+        return (pendingLP_BNB, pendingLP_GOLD);
+    }
+
+    /// @notice 池子是否已建立
+    function getLPStatus() external view returns (bool launched) {
+        return lpLaunched;
+    }
+
+    /// @notice 距离触发建池还需铸造的 NFT 数量
+    function getRemainingToLaunch() external view returns (uint256) {
+        uint256 count = genesisCore.totalGenesisCount();
+        if (count >= LP_INJECT_THRESHOLD) return 0;
+        return LP_INJECT_THRESHOLD - count;
+    }
+
+    /// @notice 累计注入 LP 的总量
+    function getTotalLPInjected() external view returns (uint256 bnb, uint256 gold) {
+        return (totalLPBNBInjected, totalLPGOLDInjected);
+    }
+
+    /// @notice 当前铸造价格
+    function getGenesisPrice() external view returns (uint256) {
+        return genesisCore.getGenesisPrice();
+    }
+
+    /// @notice 剩余可铸造数量
+    function getRemainingGenesis() external view returns (uint256) {
+        return genesisCore.MAX_GENESIS() - genesisCore.totalGenesisCount();
+    }
+
+    /// @notice 累计 BNB 收入
+    function getTotalRaised() external view returns (uint256) {
+        return totalRaised;
+    }
+
+    /* ========== RECEIVE ========== */
+
+    /// @dev 接收 PancakeSwap 退回的 BNB
+    receive() external payable {}
+
+    // ============================================================
+    // ⛔ 注意: 本合约没有任何函数可以转出 LP 代币
+    //    LP 代币发到 address(this) 后永久锁定
+    //    没有 withdraw / rescue / transfer LP 的函数
+    //    owner 也无法取出
+    // ============================================================
+}
+
+// ========== ReproductionEngine.sol ==========
+
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+/**
+ * @title ReproductionEngine
+ * @notice CodeDNA 繁殖引擎 — 子代 DNA 生成 (孟德尔遗传 + 1.17%突变 + 天才突变事件)
+ *
+ * 核心逻辑:
+ *   1. 23条基因逐条继承（50%父/50%母，keccak256确定性选择）
+ *   2. 每条基因 ~1.17% 概率突变 (uint8(r[1]) < 3)
+ *   3. 天才突变: 突变后 IQ 相关基因 (index 0,5,8) 值 >= 240 → emit GeneMutated 史诗事件
+ *   4. 子代能量初始化: lastEatBlock = block.number, agentEnergy = 50
+ */
+
+/* ========== INTERFACES ========== */
+
+interface IREGenesisCore {
+    function getGenes(uint256 tokenId) external view returns (uint8[23] memory);
+    function mintOffspring(address to, uint256 fatherId, uint256 motherId) external returns (uint256);
+    function agentEnergy(uint256 tokenId) external view returns (uint256);
+    function lastEatBlock(uint256 tokenId) external view returns (uint256);
+}
+
+contract ReproductionEngine {
+
+    /* ========== CONSTANTS ========== */
+
+    uint256 public constant ENERGY_INIT_OFFSPRING = 50;
+    uint256 public constant MUTATION_THRESHOLD    = 3;    // uint8(r[1]) < 3 → ~1.17%
+    uint256 public constant TALENT_THRESHOLD      = 240;  // gene value >= 240 = 天才
+
+    /// @notice IQ 相关基因索引
+    uint8 public constant GENE_IQ_PRIMARY    = 0;
+    uint8 public constant GENE_CREATIVITY    = 5;
+    uint8 public constant GENE_IQ_SECONDARY  = 8;
+
+    /* ========== STATE ========== */
+
+    IREGenesisCore public immutable core;
+    address public immutable gameContract;
+
+    /* ========== EVENTS ========== */
+
+    /**
+     * @notice 天才突变事件 — 前端监听生成史诗叙事
+     * @param childId   子代 tokenId
+     * @param geneIndex 突变基因索引 (0/5/8 for IQ-related)
+     * @param oldValue  突变前的基因值 (继承值)
+     * @param newValue  突变后的基因值 (>= 240)
+     */
+    event GeneMutated(uint256 indexed childId, uint8 geneIndex, uint8 oldValue, uint8 newValue);
+
+    /**
+     * @notice 子代诞生事件（含完整基因摘要）
+     */
+    event ChildGenerated(
+        uint256 indexed childId,
+        uint256 indexed fatherId,
+        uint256 indexed motherId,
+        uint8 mutationCount,
+        uint8 talentCount
+    );
+
+    /* ========== ERRORS ========== */
+
+    error OnlyGame();
+
+    /* ========== MODIFIER ========== */
+
+    modifier onlyGame() {
+        if (msg.sender != gameContract) revert OnlyGame();
+        _;
+    }
+
+    /* ========== CONSTRUCTOR ========== */
+
+    constructor(address _core, address _gameContract) {
+        core = IREGenesisCore(_core);
+        gameContract = _gameContract;
+    }
+
+    /// @dev Allow contract to receive ETH (needed for hardhat impersonation tests)
+
+    /* ========== TALENT CHECK ========== */
+
+    /**
+     * @notice 判断某基因索引是否属于 IQ 天才基因
+     */
+    function isTalentGene(uint8 geneIndex) public pure returns (bool) {
+        return geneIndex == GENE_IQ_PRIMARY
+            || geneIndex == GENE_CREATIVITY
+            || geneIndex == GENE_IQ_SECONDARY;
+    }
+
+    /* ========== CORE: generateChild ========== */
+
+    /**
+     * @notice 生成子代：DNA继承 + 突变 + 天才检测 + 铸造 NFT + 能量初始化
+     * @param fatherId  父方 tokenId
+     * @param motherId  母方 tokenId
+     * @param childOwner 子代宿主地址
+     * @return childId  新铸造的子代 tokenId
+     *
+     * @dev 调用 GenesisCore.mintOffspring() 完成:
+     *        - DNA 写入 agentGenes[childId]
+     *        - lastEatBlock[childId] = block.number
+     *        - agentEnergy[childId] = 50
+     *        - _mint(childOwner, childId)
+     *      本合约在 mintOffspring 之后读取实际写入的基因，
+     *      检测天才突变并 emit 事件。
+     *
+     *      注意: GenesisCore.mintOffspring 已包含 DNA 生成逻辑，
+     *      本合约作为上层封装，提供天才突变检测 + 统计 emit。
+     */
+    function generateChild(
+        uint256 fatherId,
+        uint256 motherId,
+        address childOwner
+    ) external onlyGame returns (uint256 childId) {
+        // 读取父母基因 (用于突变前后对比)
+        uint8[23] memory fGenes = core.getGenes(fatherId);
+        uint8[23] memory mGenes = core.getGenes(motherId);
+
+        // 铸造子代 (GenesisCore 内部完成 DNA 生成 + 能量初始化)
+        childId = core.mintOffspring(childOwner, fatherId, motherId);
+
+        // 读取子代实际基因 (GenesisCore 已写入)
+        uint8[23] memory cGenes = core.getGenes(childId);
+
+        // 逐基因分析: 检测突变 + 天才突变
+        uint8 mutationCount = 0;
+        uint8 talentCount   = 0;
+
+        for (uint256 i = 0; i < 23; i++) {
+            // 重建继承值：与 GenesisCore.mintOffspring 相同的 keccak256
+            bytes32 r = keccak256(abi.encodePacked(fatherId, motherId, i, block.prevrandao, block.number));
+            uint8 inheritedValue = uint8(r[0]) % 2 == 0 ? fGenes[i] : mGenes[i];
+
+            // 如果实际值 ≠ 继承值 → 发生了突变
+            if (cGenes[i] != inheritedValue) {
+                mutationCount++;
+
+                // 天才突变检测: IQ 相关基因 (0,5,8) 且突变值 >= 240
+                if (isTalentGene(uint8(i)) && cGenes[i] >= TALENT_THRESHOLD) {
+                    talentCount++;
+                    emit GeneMutated(childId, uint8(i), inheritedValue, cGenes[i]);
+                }
+            }
+        }
+
+        emit ChildGenerated(childId, fatherId, motherId, mutationCount, talentCount);
+
+        return childId;
+    }
+
+    /**
+     * @notice 纯 view 函数：预测子代基因（不写入链上，用于前端模拟）
+     * @dev 注意: block.prevrandao 和 block.number 会变，只在同一区块内准确
+     */
+    function previewChildGenes(
+        uint256 fatherId,
+        uint256 motherId
+    ) external view returns (
+        uint8[23] memory predictedGenes,
+        uint8 predictedMutations,
+        bool hasTalent
+    ) {
+        uint8[23] memory fGenes = core.getGenes(fatherId);
+        uint8[23] memory mGenes = core.getGenes(motherId);
+
+        for (uint256 i = 0; i < 23; i++) {
+            bytes32 r = keccak256(abi.encodePacked(fatherId, motherId, i, block.prevrandao, block.number));
+            predictedGenes[i] = uint8(r[0]) % 2 == 0 ? fGenes[i] : mGenes[i];
+            if (uint8(r[1]) < MUTATION_THRESHOLD) {
+                uint8 mutatedVal = uint8(r[2]);
+                predictedGenes[i] = mutatedVal;
+                predictedMutations++;
+                if (isTalentGene(uint8(i)) && mutatedVal >= TALENT_THRESHOLD) {
+                    hasTalent = true;
+                }
+            }
+        }
+    }
+}
+
+// ========== WorldMap.sol ==========
+
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+/**
+ * @title WorldMap
+ * @notice CodeDNA 世界地图 — 1000×1000 稀疏存储, 4种地块, 探索奖励
+ *
+ * 地图: 1,000,000 格, plotId = x * 1000 + y
+ * 地块类型: 由 keccak256(plotId) 永久决定, 不存储
+ * 探索奖励: 每格全服唯一首次奖励, 每 Agent 每窗口最多 10 次
+ */
+contract WorldMap {
+
+    /* ========== CONSTANTS ========== */
+
+    uint256 public constant MAP_SIZE             = 1_000;
+    uint256 public constant EXPLORE_WINDOW       = 28_800;  // ≈1天
+    uint256 public constant EXPLORE_WINDOW_LIMIT = 10;
+    uint256 public constant EXPLORE_BONUS        = 200;     // 200 枚锁定 DNAGOLD (不含精度, 由调用方乘 1e18)
+
+    /* ========== STATE ========== */
+
+    address public immutable gameContract;
+
+    /// @notice 每格 Agent 数量 (稀疏: 只存有人的格子)
+    mapping(uint256 => uint256) public plotAgentCount;
+
+    /// @notice Agent 当前位置 (plotId)
+    mapping(uint256 => uint256) public agentLocation;
+
+    /// @notice Agent 是否已放置到地图上
+    mapping(uint256 => bool) public agentOnMap;
+
+    /// @notice 全服每格唯一: 是否已被探索过
+    mapping(uint256 => bool) public plotEverExplored;
+
+    /// @notice Agent 探索窗口起始区块
+    mapping(uint256 => uint256) public exploreWindowStart;
+
+    /// @notice Agent 当前窗口内探索次数
+    mapping(uint256 => uint256) public exploreCountInWindow;
+
+    /* ========== EVENTS ========== */
+
+    event AgentPlaced(uint256 indexed agentId, uint256 plotId);
+    event AgentMoved(uint256 indexed agentId, uint256 fromPlot, uint256 toPlot);
+    event PlotExplored(uint256 indexed agentId, uint256 indexed plotId);
+    event AgentRemovedFromMap(uint256 indexed agentId, uint256 plotId);
+
+    /* ========== ERRORS ========== */
+
+    error OnlyGame();
+    error OutOfBounds(uint256 x, uint256 y);
+    error NotOnMap(uint256 agentId);
+    error AlreadyOnMap(uint256 agentId);
+    error InvalidDistance(uint256 distance);
+
+    /* ========== MODIFIER ========== */
+
+    modifier onlyGame() {
+        if (msg.sender != gameContract) revert OnlyGame();
+        _;
+    }
+
+    /* ========== CONSTRUCTOR ========== */
+
+    constructor(address _gameContract) {
+        gameContract = _gameContract;
+    }
+
+    /* ========== PLACEMENT ========== */
+
+    /**
+     * @notice 将 Agent 放置到地图 (铸造/出生时调用)
+     */
+    function placeAgent(uint256 agentId, uint256 x, uint256 y) external onlyGame {
+        if (agentOnMap[agentId]) revert AlreadyOnMap(agentId);
+        if (x >= MAP_SIZE || y >= MAP_SIZE) revert OutOfBounds(x, y);
+
+        uint256 plotId = x * MAP_SIZE + y;
+        agentLocation[agentId] = plotId;
+        agentOnMap[agentId] = true;
+        plotAgentCount[plotId]++;
+
+        _checkExploreReward(agentId, plotId);
+
+        emit AgentPlaced(agentId, plotId);
+    }
+
+    /* ========== MOVEMENT ========== */
+
+    /**
+     * @notice 移动 Agent 到相邻格 (曼哈顿距离=1)
+     */
+    function moveAgent(uint256 agentId, uint256 newX, uint256 newY) external onlyGame {
+        if (!agentOnMap[agentId]) revert NotOnMap(agentId);
+        if (newX >= MAP_SIZE || newY >= MAP_SIZE) revert OutOfBounds(newX, newY);
+
+        uint256 oldPlot = agentLocation[agentId];
+        uint256 newPlot = newX * MAP_SIZE + newY;
+
+        // 曼哈顿距离必须 = 1
+        uint256 dist = getManhattanDistance(oldPlot, newPlot);
+        if (dist != 1) revert InvalidDistance(dist);
+
+        // 更新地块人口
+        plotAgentCount[oldPlot]--;
+        plotAgentCount[newPlot]++;
+
+        // 更新 Agent 位置
+        agentLocation[agentId] = newPlot;
+
+        // 探索奖励检查
+        _checkExploreReward(agentId, newPlot);
+
+        emit AgentMoved(agentId, oldPlot, newPlot);
+    }
+
+    /**
+     * @notice Agent 死亡时从地图移除
+     */
+    function removeAgent(uint256 agentId) external onlyGame {
+        if (!agentOnMap[agentId]) return; // 已不在地图, 静默返回
+
+        uint256 plotId = agentLocation[agentId];
+        if (plotAgentCount[plotId] > 0) {
+            plotAgentCount[plotId]--;
+        }
+
+        agentOnMap[agentId] = false;
+        delete agentLocation[agentId];
+
+        emit AgentRemovedFromMap(agentId, plotId);
+    }
+
+    /* ========== EXPLORE REWARD (internal) ========== */
+
+    /**
+     * @dev 首次探索奖励检查 — 仅在 move/place 时调用
+     *
+     * 条件:
+     *   1. 该格未被任何人探索过
+     *   2. Agent 当前窗口未超 10 次上限
+     *   窗口过期时自动重置
+     *
+     * 不直接发奖, 仅标记状态 + emit 事件, 由 BehaviorEngine 读取事件发奖
+     */
+    function _checkExploreReward(uint256 agentId, uint256 plotId) internal {
+        // 已探索过的格子不奖
+        if (plotEverExplored[plotId]) return;
+
+        // 窗口过期, 重置
+        if (block.number >= exploreWindowStart[agentId] + EXPLORE_WINDOW) {
+            exploreWindowStart[agentId] = block.number;
+            exploreCountInWindow[agentId] = 0;
+        }
+
+        // 窗口内已达上限, 静默跳过 (移动本身不 revert)
+        if (exploreCountInWindow[agentId] >= EXPLORE_WINDOW_LIMIT) return;
+
+        // 标记探索
+        plotEverExplored[plotId] = true;
+        exploreCountInWindow[agentId]++;
+
+        emit PlotExplored(agentId, plotId);
+    }
+
+    /* ========== PURE QUERIES ========== */
+
+    /**
+     * @notice 曼哈顿距离 |x1-x2| + |y1-y2|
+     */
+    function getManhattanDistance(uint256 plotIdA, uint256 plotIdB) public pure returns (uint256) {
+        uint256 x1 = plotIdA / MAP_SIZE;
+        uint256 y1 = plotIdA % MAP_SIZE;
+        uint256 x2 = plotIdB / MAP_SIZE;
+        uint256 y2 = plotIdB % MAP_SIZE;
+
+        uint256 dx = x1 > x2 ? x1 - x2 : x2 - x1;
+        uint256 dy = y1 > y2 ? y1 - y2 : y2 - y1;
+
+        return dx + dy;
+    }
+
+    /**
+     * @notice 地块类型倍率 (千分比)
+     * @return multiplier 1000=草原, 1500=森林, 600=山地, 3000=矿脉
+     */
+    function getPlotMultiplier(uint256 plotId) public pure returns (uint256 multiplier) {
+        uint256 plotHash = uint256(keccak256(abi.encodePacked(plotId)));
+        uint256 mod = plotHash % 10;
+
+        if (mod < 5) {
+            return 1000;  // GRASSLAND ×1.0
+        } else if (mod < 7) {
+            return 1500;  // FOREST ×1.5
+        } else if (mod < 9) {
+            return 600;   // MOUNTAIN ×0.6
+        } else {
+            return 3000;  // MINE ×3.0
+        }
+    }
+
+    /**
+     * @notice 地块类型枚举 (0=草原, 1=森林, 2=山地, 3=矿脉)
+     */
+    function getPlotType(uint256 plotId) public pure returns (uint8) {
+        uint256 plotHash = uint256(keccak256(abi.encodePacked(plotId)));
+        uint256 mod = plotHash % 10;
+
+        if (mod < 5) return 0;       // GRASSLAND
+        else if (mod < 7) return 1;  // FOREST
+        else if (mod < 9) return 2;  // MOUNTAIN
+        else return 3;               // MINE
+    }
+
+    /**
+     * @notice plotId 转坐标
+     */
+    function toCoords(uint256 plotId) public pure returns (uint256 x, uint256 y) {
+        return (plotId / MAP_SIZE, plotId % MAP_SIZE);
+    }
+
+    /**
+     * @notice 坐标转 plotId
+     */
+    function toPlotId(uint256 x, uint256 y) public pure returns (uint256) {
+        return x * MAP_SIZE + y;
+    }
+}
